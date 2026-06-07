@@ -12,7 +12,8 @@ export default function App() {
   const [clients, setClients]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
-  const [filter, setFilter]     = useState('attivi'); // 'tutti' | 'attivi'
+  const [filter, setFilter]         = useState('attivi'); // 'tutti' | 'attivi'
+  const [servicioFilter, setServicioFilter] = useState(null); // null = tutti i servizi
 
   const load = async () => {
     setLoading(true);
@@ -29,12 +30,19 @@ export default function App() {
 
   useEffect(() => { load(); }, []);
 
-  const visibleClients = useMemo(() =>
-    filter === 'attivi'
+  const allServizi = useMemo(() => {
+    const set = new Set();
+    clients.forEach(c => c.servizi.forEach(s => set.add(s)));
+    return [...set].sort();
+  }, [clients]);
+
+  const visibleClients = useMemo(() => {
+    let list = filter === 'attivi'
       ? clients.filter(c => c.stato.some(s => STATO_ATTIVO.has(s)))
-      : clients,
-    [clients, filter]
-  );
+      : clients;
+    if (servicioFilter) list = list.filter(c => c.servizi.includes(servicioFilter));
+    return list;
+  }, [clients, filter, servicioFilter]);
 
   const revenue  = useMemo(() => buildForecast(visibleClients), [visibleClients]);
   const labels   = useMemo(() => buildLabels(), []);
@@ -169,7 +177,7 @@ export default function App() {
           <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
             clienti &amp; mesi attivi
           </p>
-          <div style={{ display: 'flex', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {['attivi', 'tutti'].map(f => (
               <button
                 key={f}
@@ -185,6 +193,26 @@ export default function App() {
                 }}
               >{f}</button>
             ))}
+            {allServizi.length > 0 && (
+              <>
+                <span style={{ width: '0.5px', background: 'var(--border2)', margin: '2px 2px' }} />
+                {[null, ...allServizi].map(s => (
+                  <button
+                    key={s ?? '__all__'}
+                    onClick={() => setServicioFilter(s)}
+                    style={{
+                      fontSize: '11px', fontFamily: 'var(--mono)',
+                      padding: '4px 10px',
+                      borderRadius: 'var(--radius)',
+                      border: `0.5px solid ${servicioFilter === s ? 'var(--blue)' : 'var(--border2)'}`,
+                      color: servicioFilter === s ? 'var(--blue)' : 'var(--muted)',
+                      background: servicioFilter === s ? 'rgba(91,156,246,0.08)' : 'transparent',
+                      cursor: 'pointer',
+                    }}
+                  >{s ?? 'tutti i servizi'}</button>
+                ))}
+              </>
+            )}
           </div>
         </div>
 
