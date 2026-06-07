@@ -14,6 +14,7 @@ export default function App() {
   const [error, setError]       = useState(null);
   const [filter, setFilter]         = useState('attivi'); // 'tutti' | 'attivi'
   const [servicioFilter, setServicioFilter] = useState(null); // null = tutti i servizi
+  const [tipoFilter, setTipoFilter]         = useState(null); // null | 'ricorrente' | 'una tantum'
 
   const load = async () => {
     setLoading(true);
@@ -41,8 +42,10 @@ export default function App() {
       ? clients.filter(c => c.stato.some(s => STATO_ATTIVO.has(s)))
       : clients;
     if (servicioFilter) list = list.filter(c => c.servizi.includes(servicioFilter));
+    if (tipoFilter === 'ricorrente') list = list.filter(c => c.mrr > 0);
+    if (tipoFilter === 'una tantum') list = list.filter(c => c.mrr === 0);
     return list;
-  }, [clients, filter, servicioFilter]);
+  }, [clients, filter, servicioFilter, tipoFilter]);
 
   const revenue  = useMemo(() => buildForecast(visibleClients), [visibleClients]);
   const labels   = useMemo(() => buildLabels(), []);
@@ -213,6 +216,22 @@ export default function App() {
                 ))}
               </>
             )}
+            <span style={{ width: '0.5px', background: 'var(--border2)', margin: '2px 2px' }} />
+            {[null, 'ricorrente', 'una tantum'].map(t => (
+              <button
+                key={t ?? '__alltipo__'}
+                onClick={() => setTipoFilter(t)}
+                style={{
+                  fontSize: '11px', fontFamily: 'var(--mono)',
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius)',
+                  border: `0.5px solid ${tipoFilter === t ? 'var(--orange)' : 'var(--border2)'}`,
+                  color: tipoFilter === t ? 'var(--orange)' : 'var(--muted)',
+                  background: tipoFilter === t ? 'rgba(240,146,74,0.08)' : 'transparent',
+                  cursor: 'pointer',
+                }}
+              >{t ?? 'tutti i tipi'}</button>
+            ))}
           </div>
         </div>
 
