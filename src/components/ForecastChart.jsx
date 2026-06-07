@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import {
-  Chart, BarElement, LineElement, PointElement,
+  Chart, BarController, LineController,
+  BarElement, LineElement, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js';
 
-Chart.register(BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
+Chart.register(BarController, LineController, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 export default function ForecastChart({ labels, revenue, trend }) {
   const canvasRef = useRef(null);
