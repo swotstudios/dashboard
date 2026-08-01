@@ -14,9 +14,9 @@ export function buildForecast(clients) {
     const mIdx = (startMonth + i) % 12;
     const meseName = MESI[mIdx];
     return clients.reduce((sum, c) => {
-      const active = c.mesiAttivi.length === 0
-        ? true // if no months set, assume always active
-        : c.mesiAttivi.includes(meseName);
+      if (c.mrr === 0) return sum;
+      // If no months set, recurring client is active every month
+      const active = c.mesiAttivi.length === 0 || c.mesiAttivi.includes(meseName);
       return sum + (active ? c.mrr : 0);
     }, 0);
   });

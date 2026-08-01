@@ -69,7 +69,11 @@ export default async function handler(req, res) {
 
   // ── PATCH /api/notion  →  update a single page (MRR + Mesi Attivi) ──────
   if (req.method === 'PATCH') {
-    const { pageId, mrr, mesiAttivi } = req.body;
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+    }
+    const { pageId, mrr, mesiAttivi } = body ?? {};
     if (!pageId) return res.status(400).json({ error: 'pageId required' });
 
     const properties = {};

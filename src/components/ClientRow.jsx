@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { MESI, MESI_SHORT } from '../lib/forecast.js';
 import { updateClient } from '../lib/notion.js';
@@ -27,6 +27,15 @@ export default function ClientRow({ client, onChange }) {
   const [mesi, setMesi]       = useState(client.mesiAttivi);
   const [saving, setSaving]   = useState(false);
   const [dirty, setDirty]     = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  // Sync local state when parent reloads data (e.g. after "aggiorna")
+  useEffect(() => {
+    setMrr(client.mrr);
+    setMesi(client.mesiAttivi);
+    setDirty(false);
+    setSaveError(false);
+  }, [client.id, client.mrr, client.mesiAttivi]);
 
   const toggleMese = useCallback((mese) => {
     setMesi(prev => {
@@ -43,12 +52,15 @@ export default function ClientRow({ client, onChange }) {
 
   const save = async () => {
     setSaving(true);
+    setSaveError(false);
     try {
-      await updateClient(client.id, { mrr: parseFloat(mrr) || 0, mesiAttivi: mesi });
-      onChange({ ...client, mrr: parseFloat(mrr) || 0, mesiAttivi: mesi });
+      const newMrr = parseFloat(mrr) || 0;
+      await updateClient(client.id, { mrr: newMrr, mesiAttivi: mesi });
+      onChange({ ...client, mrr: newMrr, mesiAttivi: mesi });
       setDirty(false);
     } catch (e) {
       console.error(e);
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -139,7 +151,10 @@ export default function ClientRow({ client, onChange }) {
       </td>
 
       {/* Salva */}
-      <td style={{ ...tdStyle, width: '60px', textAlign: 'right' }}>
+      <td style={{ ...tdStyle, width: '70px', textAlign: 'right' }}>
+        {saveError && !dirty && (
+          <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--red)' }}>errore</span>
+        )}
         {dirty && (
           <button
             onClick={save}
@@ -149,14 +164,14 @@ export default function ClientRow({ client, onChange }) {
               fontFamily: 'var(--mono)',
               padding: '4px 10px',
               borderRadius: 'var(--radius)',
-              border: '0.5px solid var(--accent)',
-              color: 'var(--accent)',
-              background: 'rgba(200,240,74,0.08)',
+              border: `0.5px solid ${saveError ? 'var(--red)' : 'var(--accent)'}`,
+              color: saveError ? 'var(--red)' : 'var(--accent)',
+              background: saveError ? 'rgba(224,82,82,0.08)' : 'rgba(200,240,74,0.08)',
               cursor: 'pointer',
               opacity: saving ? 0.5 : 1,
             }}
           >
-            {saving ? '...' : 'salva'}
+            {saving ? '...' : saveError ? 'riprova' : 'salva'}
           </button>
         )}
       </td>
