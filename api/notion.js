@@ -1,8 +1,28 @@
-// api/notion.js  — Vercel Serverless Function
-// Proxies requests to the Notion API so the token never hits the browser.
+// api/notion.js — Vercel Serverless Function
+
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+async function parseBody(req) {
+  // Vercel may auto-parse as object, or leave as string/stream
+  if (req.body !== undefined && req.body !== null && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    return req.body;
+  }
+  const raw = Buffer.isBuffer(req.body)
+    ? req.body.toString('utf8')
+    : typeof req.body === 'string'
+    ? req.body
+    : await readRawBody(req);
+  return JSON.parse(raw || '{}');
+}
 
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -12,7 +32,7 @@ export default async function handler(req, res) {
   const DATABASE_ID  = process.env.NOTION_DATABASE_ID;
 
   if (!NOTION_TOKEN || !DATABASE_ID) {
-    return res.status(500).json({ error: 'Missing NOTION_TOKEN or NOTION_DATABASE_ID env vars' });
+    return res.status(500).json({ error: 'Missing env vars' });
   }
 
   const headers = {
@@ -21,10 +41,10 @@ export default async function handler(req, res) {
     'Content-Type': 'application/json',
   };
 
-  // ── GET /api/notion  →  list all pages in the database ──────────────────
+  // ── GET → list all clients ──────────────────────────────────────────────
   if (req.method === 'GET') {
     let allResults = [];
-    let cursor = undefined;
+    let cursor;
 
     do {
       const body = {
@@ -32,73 +52,56 @@ export default async function handler(req, res) {
         sorts: [{ property: 'Cliente', direction: 'ascending' }],
         ...(cursor ? { start_cursor: cursor } : {}),
       };
-
       const r = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
+        method: 'POST', headers, body: JSON.stringify(body),
       });
-
-      if (!r.ok) {
-        const err = await r.json();
-        return res.status(r.status).json(err);
-      }
-
+      if (!r.ok) return res.status(r.status).json(await r.json());
       const data = await r.json();
       allResults = allResults.concat(data.results);
       cursor = data.has_more ? data.next_cursor : undefined;
     } while (cursor);
 
-    // Map raw Notion pages → clean objects
-    const clients = allResults.map((page) => {
+    const clients = allResults.map(page => {
       const p = page.properties;
       return {
-        id: page.id,
-        nome: p.Cliente?.title?.[0]?.plain_text ?? '—',
-        servizi: p.Servizio?.multi_select?.map((s) => s.name) ?? [],
-        stato: p['Stato Lavori']?.multi_select?.map((s) => s.name) ?? [],
-        mrr: parseFloat(p.MRR?.rich_text?.[0]?.plain_text ?? '0') || 0,
-        mesiAttivi: p['Mesi Attivi']?.multi_select?.map((s) => s.name) ?? [],
-        categoria: p.Categoria?.multi_select?.map((s) => s.name) ?? [],
-        notionUrl: page.url,
+        id:          page.id,
+        nome:        p.Cliente?.title?.[0]?.plain_text ?? '—',
+        servizi:     p.Servizio?.multi_select?.map(s => s.name) ?? [],
+        stato:       p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
+        mrr:         parseFloat(p.MRR?.rich_text?.[0]?.plain_text ?? '0') || 0,
+        mesiAttivi:  p['Mesi Attivi']?.multi_select?.map(s => s.name) ?? [],
+        categoria:   p.Categoria?.multi_select?.map(s => s.name) ?? [],
+        notionUrl:   page.url,
       };
     });
 
     return res.status(200).json(clients);
   }
 
-  // ── PATCH /api/notion  →  update a single page (MRR + Mesi Attivi) ──────
+  // ── PATCH → update Mesi Attivi for a page ──────────────────────────────
   if (req.method === 'PATCH') {
-    let body = req.body;
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+    let body;
+    try {
+      body = await parseBody(req);
+    } catch {
+      return res.status(400).json({ error: 'Invalid request body' });
     }
-    const { pageId, mrr, mesiAttivi } = body ?? {};
-    if (!pageId) return res.status(400).json({ error: 'pageId required' });
 
-    const properties = {};
-    if (mrr !== undefined) {
-      properties['MRR'] = {
-        rich_text: [{ type: 'text', text: { content: String(mrr) } }],
-      };
-    }
-    if (mesiAttivi !== undefined) {
-      properties['Mesi Attivi'] = {
-        multi_select: mesiAttivi.map((m) => ({ name: m })),
-      };
-    }
+    const { pageId, mesiAttivi } = body;
+    if (!pageId) return res.status(400).json({ error: 'pageId required' });
+    if (!Array.isArray(mesiAttivi)) return res.status(400).json({ error: 'mesiAttivi must be an array' });
 
     const r = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ properties }),
+      body: JSON.stringify({
+        properties: {
+          'Mesi Attivi': { multi_select: mesiAttivi.map(m => ({ name: m })) },
+        },
+      }),
     });
 
-    if (!r.ok) {
-      const err = await r.json();
-      return res.status(r.status).json(err);
-    }
-
+    if (!r.ok) return res.status(r.status).json(await r.json());
     return res.status(200).json({ ok: true });
   }
 
