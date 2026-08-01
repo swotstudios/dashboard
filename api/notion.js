@@ -87,18 +87,22 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid request body' });
     }
 
-    const { pageId, mesiAttivi } = body;
+    const { pageId, mesiAttivi, mrr } = body;
     if (!pageId) return res.status(400).json({ error: 'pageId required' });
-    if (!Array.isArray(mesiAttivi)) return res.status(400).json({ error: 'mesiAttivi must be an array' });
+
+    const properties = {};
+    if (Array.isArray(mesiAttivi)) {
+      properties['Mesi Attivi'] = { multi_select: mesiAttivi.map(m => ({ name: m })) };
+    }
+    if (mrr !== undefined) {
+      properties['MRR'] = { rich_text: [{ type: 'text', text: { content: String(mrr) } }] };
+    }
+    if (!Object.keys(properties).length) return res.status(400).json({ error: 'nothing to update' });
 
     const r = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({
-        properties: {
-          'Mesi Attivi': { multi_select: mesiAttivi.map(m => ({ name: m })) },
-        },
-      }),
+      body: JSON.stringify({ properties }),
     });
 
     if (!r.ok) return res.status(r.status).json(await r.json());

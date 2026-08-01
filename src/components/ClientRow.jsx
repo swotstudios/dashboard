@@ -31,7 +31,7 @@ function Tag({ label }) {
 }
 
 function StatoBadge({ stati }) {
-  if (!stati?.length) return <span style={{ color: '#444', fontSize: '11px' }}>—</span>;
+  if (!stati?.length) return <span style={{ color: '#444', fontSize: '11px' }}>-</span>;
   const s = stati[0];
   const c = STATO_COLOR[s] || { color: '#6b6b6b', bg: 'rgba(255,255,255,0.05)' };
   return (
@@ -44,17 +44,19 @@ function StatoBadge({ stati }) {
 }
 
 export default function ClientRow({ client, onChange }) {
-  const [mesi, setMesi]     = useState(client.mesiAttivi);
-  const [saving, setSaving] = useState(false);
+  const [mrr, setMrr]         = useState(client.mrr);
+  const [mesi, setMesi]       = useState(client.mesiAttivi);
+  const [saving, setSaving]   = useState(false);
   const [saveErr, setSaveErr] = useState(false);
-  const timer = useRef(null);
+  const mrrTimer  = useRef(null);
+  const mesiTimer = useRef(null);
 
-  const doSave = useCallback(async (nextMesi) => {
+  const doSave = useCallback(async (patch) => {
     setSaving(true);
     setSaveErr(false);
     try {
-      await updateClient(client.id, { mesiAttivi: nextMesi });
-      onChange({ ...client, mesiAttivi: nextMesi });
+      await updateClient(client.id, patch);
+      onChange({ ...client, ...patch });
     } catch (e) {
       console.error(e);
       setSaveErr(true);
@@ -63,16 +65,24 @@ export default function ClientRow({ client, onChange }) {
     }
   }, [client, onChange]);
 
+  const handleMrr = (v) => {
+    setMrr(v);
+    clearTimeout(mrrTimer.current);
+    mrrTimer.current = setTimeout(() => {
+      doSave({ mrr: parseFloat(v) || 0, mesiAttivi: mesi });
+    }, 900);
+  };
+
   const toggleMese = useCallback((mese) => {
     setMesi(prev => {
       const next = prev.includes(mese)
         ? prev.filter(m => m !== mese)
         : [...prev, mese];
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => doSave(next), 700);
+      clearTimeout(mesiTimer.current);
+      mesiTimer.current = setTimeout(() => doSave({ mrr: parseFloat(mrr) || 0, mesiAttivi: next }), 700);
       return next;
     });
-  }, [doSave]);
+  }, [doSave, mrr]);
 
   const td = { padding: '10px 12px', borderBottom: '0.5px solid var(--border)', verticalAlign: 'middle' };
 
@@ -96,7 +106,9 @@ export default function ClientRow({ client, onChange }) {
       {/* Servizi */}
       <td style={td}>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {client.servizi.length ? client.servizi.map(s => <Tag key={s} label={s} />) : <span style={{ color: '#444', fontSize: '11px' }}>—</span>}
+          {client.servizi.length
+            ? client.servizi.map(s => <Tag key={s} label={s} />)
+            : <span style={{ color: '#444', fontSize: '11px' }}>-</span>}
         </div>
       </td>
 
@@ -105,14 +117,31 @@ export default function ClientRow({ client, onChange }) {
         <StatoBadge stati={client.stato} />
       </td>
 
-      {/* MRR — read-only */}
+      {/* MRR — editabile, auto-save */}
       <td style={td}>
-        <span style={{
-          fontFamily: 'var(--mono)', fontSize: '13px', fontWeight: 500,
-          color: client.mrr > 0 ? 'var(--text)' : '#444',
-        }}>
-          {client.mrr > 0 ? `€ ${client.mrr.toLocaleString('it-IT')}` : '—'}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>
+            {saving ? '...' : saveErr ? '!' : 'EUR'}
+          </span>
+          <input
+            type="number"
+            value={mrr}
+            onChange={e => handleMrr(e.target.value)}
+            min="0"
+            step="50"
+            placeholder="0"
+            style={{
+              width: '80px',
+              background: saveErr ? 'rgba(224,82,82,0.08)' : 'var(--surface2)',
+              border: `0.5px solid ${saveErr ? 'var(--red)' : 'var(--border2)'}`,
+              borderRadius: 'var(--radius)',
+              padding: '4px 8px',
+              color: 'var(--text)',
+              fontFamily: 'var(--mono)',
+              fontSize: '13px',
+            }}
+          />
+        </div>
       </td>
 
       {/* Mesi Attivi — toggleable, auto-save */}
@@ -133,12 +162,6 @@ export default function ClientRow({ client, onChange }) {
               </button>
             );
           })}
-          <span style={{
-            fontSize: '9px', fontFamily: 'var(--mono)', marginLeft: '4px', width: '8px',
-            color: saveErr ? 'var(--red)' : saving ? 'var(--muted)' : 'transparent',
-          }}>
-            {saveErr ? '!' : '·'}
-          </span>
         </div>
       </td>
     </tr>

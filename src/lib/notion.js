@@ -6,11 +6,11 @@ export async function fetchClients() {
   return r.json();
 }
 
-export async function updateClient(pageId, { mesiAttivi }) {
+export async function updateClient(pageId, { mrr, mesiAttivi }) {
   const r = await fetch(BASE, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pageId, mesiAttivi }),
+    body: JSON.stringify({ pageId, mrr, mesiAttivi }),
   });
   if (!r.ok) throw new Error(`Notion update error: ${r.status}`);
   return r.json();
