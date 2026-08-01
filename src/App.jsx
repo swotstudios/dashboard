@@ -15,6 +15,7 @@ export default function App() {
   const [filter, setFilter]         = useState('attivi'); // 'tutti' | 'attivi'
   const [servicioFilter, setServicioFilter] = useState(null); // null = tutti i servizi
   const [tipoFilter, setTipoFilter]         = useState(null); // null | 'ricorrente' | 'una tantum'
+  const [reloadKey, setReloadKey]           = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -22,6 +23,7 @@ export default function App() {
     try {
       const data = await fetchClients();
       setClients(data);
+      setReloadKey(k => k + 1);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -260,7 +262,7 @@ export default function App() {
                   </tr>
                 ) : (
                   visibleClients.map(c => (
-                    <ClientRow key={c.id} client={c} onChange={updateClient} />
+                    <ClientRow key={`${c.id}-${reloadKey}`} client={c} onChange={updateClient} />
                   ))
                 )}
               </tbody>

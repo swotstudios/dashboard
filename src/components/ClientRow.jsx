@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { MESI, MESI_SHORT } from '../lib/forecast.js';
 import { updateClient } from '../lib/notion.js';
@@ -28,14 +28,6 @@ export default function ClientRow({ client, onChange }) {
   const [saving, setSaving]   = useState(false);
   const [dirty, setDirty]     = useState(false);
   const [saveError, setSaveError] = useState(false);
-
-  // Sync local state when parent reloads data (e.g. after "aggiorna")
-  useEffect(() => {
-    setMrr(client.mrr);
-    setMesi(client.mesiAttivi);
-    setDirty(false);
-    setSaveError(false);
-  }, [client.id, client.mrr, client.mesiAttivi]);
 
   const toggleMese = useCallback((mese) => {
     setMesi(prev => {
