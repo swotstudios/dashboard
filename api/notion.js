@@ -68,7 +68,7 @@ export default async function handler(req, res) {
         nome:        p.Cliente?.title?.[0]?.plain_text ?? '—',
         servizi:     p.Servizio?.multi_select?.map(s => s.name) ?? [],
         stato:       p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
-        mrr:         parseFloat(p.MRR?.rich_text?.[0]?.plain_text ?? '0') || 0,
+        mrr:         p.MRR?.number ?? 0,
         mesiAttivi:  p['Mesi Attivi']?.multi_select?.map(s => s.name) ?? [],
         categoria:   p.Categoria?.multi_select?.map(s => s.name) ?? [],
         notionUrl:   page.url,
@@ -95,7 +95,7 @@ export default async function handler(req, res) {
       properties['Mesi Attivi'] = { multi_select: mesiAttivi.map(m => ({ name: m })) };
     }
     if (mrr !== undefined) {
-      properties['MRR'] = { rich_text: [{ type: 'text', text: { content: String(mrr) } }] };
+      properties['MRR'] = { number: parseFloat(mrr) || 0 };
     }
     if (!Object.keys(properties).length) return res.status(400).json({ error: 'nothing to update' });
 
