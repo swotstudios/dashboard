@@ -96,7 +96,7 @@ export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 })
     });
 
     return () => chartRef.current?.destroy();
-  }, [labels, revenue, trend]);
+  }, [labels, revenue, trend, yearSplit]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '260px' }}>
