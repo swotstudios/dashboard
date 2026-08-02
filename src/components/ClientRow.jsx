@@ -48,9 +48,9 @@ export default function ClientRow({ client, onChange }) {
   const [mesi, setMesi]       = useState(client.mesiAttivi);
   const [saving, setSaving]   = useState(false);
   const [saveErr, setSaveErr] = useState(false);
-  const mrrTimer  = useRef(null);
   const mesiTimer = useRef(null);
 
+  // Called with the full patch to send to Notion
   const doSave = useCallback(async (patch) => {
     setSaving(true);
     setSaveErr(false);
@@ -58,31 +58,32 @@ export default function ClientRow({ client, onChange }) {
       await updateClient(client.id, patch);
       onChange({ ...client, ...patch });
     } catch (e) {
-      console.error(e);
+      console.error('save error', e);
       setSaveErr(true);
     } finally {
       setSaving(false);
     }
-  }, [client, onChange]);
+  }, [client.id]); // stable: only depends on the page id
 
-  const handleMrr = (v) => {
-    setMrr(v);
-    clearTimeout(mrrTimer.current);
-    mrrTimer.current = setTimeout(() => {
-      doSave({ mrr: parseFloat(v) || 0, mesiAttivi: mesi });
-    }, 900);
+  // MRR: save on blur (when user leaves the field)
+  const handleMrrBlur = () => {
+    const val = parseFloat(mrr) || 0;
+    doSave({ mrr: val, mesiAttivi: mesi });
   };
 
-  const toggleMese = useCallback((mese) => {
+  // Mesi: save 700ms after last toggle
+  const toggleMese = (mese) => {
     setMesi(prev => {
       const next = prev.includes(mese)
         ? prev.filter(m => m !== mese)
         : [...prev, mese];
       clearTimeout(mesiTimer.current);
-      mesiTimer.current = setTimeout(() => doSave({ mrr: parseFloat(mrr) || 0, mesiAttivi: next }), 700);
+      mesiTimer.current = setTimeout(() => {
+        doSave({ mrr: parseFloat(mrr) || 0, mesiAttivi: next });
+      }, 700);
       return next;
     });
-  }, [doSave, mrr]);
+  };
 
   const td = { padding: '10px 12px', borderBottom: '0.5px solid var(--border)', verticalAlign: 'middle' };
 
@@ -117,30 +118,38 @@ export default function ClientRow({ client, onChange }) {
         <StatoBadge stati={client.stato} />
       </td>
 
-      {/* MRR — editabile, auto-save */}
+      {/* MRR — editabile, salva su blur */}
       <td style={td}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>
-            {saving ? '...' : saveErr ? '!' : 'EUR'}
-          </span>
-          <input
-            type="number"
-            value={mrr}
-            onChange={e => handleMrr(e.target.value)}
-            min="0"
-            step="50"
-            placeholder="0"
-            style={{
-              width: '80px',
-              background: saveErr ? 'rgba(224,82,82,0.08)' : 'var(--surface2)',
-              border: `0.5px solid ${saveErr ? 'var(--red)' : 'var(--border2)'}`,
-              borderRadius: 'var(--radius)',
-              padding: '4px 8px',
-              color: 'var(--text)',
-              fontFamily: 'var(--mono)',
-              fontSize: '13px',
-            }}
-          />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>EUR</span>
+            <input
+              type="number"
+              value={mrr}
+              onChange={e => setMrr(e.target.value)}
+              onBlur={handleMrrBlur}
+              onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+              min="0"
+              step="50"
+              placeholder="0"
+              style={{
+                width: '80px',
+                background: saveErr ? 'rgba(224,82,82,0.08)' : 'var(--surface2)',
+                border: `0.5px solid ${saveErr ? 'var(--red)' : 'var(--border2)'}`,
+                borderRadius: 'var(--radius)',
+                padding: '4px 8px',
+                color: 'var(--text)',
+                fontFamily: 'var(--mono)',
+                fontSize: '13px',
+              }}
+            />
+          </div>
+          {saving && (
+            <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>...</span>
+          )}
+          {saveErr && !saving && (
+            <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--red)' }}>err</span>
+          )}
         </div>
       </td>
 

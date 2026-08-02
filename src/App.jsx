@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 import MetricCard from './components/MetricCard.jsx';
 import ForecastChart from './components/ForecastChart.jsx';
@@ -80,8 +80,8 @@ export default function App() {
   const trendDir  = trend[11] > trend[0];
   const nAttivi   = useMemo(() => visibleClients.filter(c => c.mrr > 0).length, [visibleClients]);
 
-  const onMesiChange = (updated) =>
-    setClients(prev => prev.map(c => c.id === updated.id ? updated : c));
+  const onMesiChange = useCallback((updated) =>
+    setClients(prev => prev.map(c => c.id === updated.id ? updated : c)), []);
 
   return (
     <div style={{ maxWidth: '1160px', margin: '0 auto', padding: '2rem 1.5rem' }}>
