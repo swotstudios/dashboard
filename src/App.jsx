@@ -4,7 +4,7 @@ import MetricCard from './components/MetricCard.jsx';
 import ForecastChart from './components/ForecastChart.jsx';
 import ClientRow from './components/ClientRow.jsx';
 import { fetchClients } from './lib/notion.js';
-import { buildForecast, buildLabels, trendline, fmt } from './lib/forecast.js';
+import { buildForecast, buildLabels, getYearSplit, trendline, fmt } from './lib/forecast.js';
 
 const STATO_ATTIVO = new Set(['In corso', 'Da iniziare', 'Da Pagare', 'In attesa di risposta']);
 
@@ -73,11 +73,15 @@ export default function App() {
   const labels   = useMemo(() => buildLabels(), []);
   const trend    = useMemo(() => trendline(revenue), [revenue]);
 
-  const totalMRR  = useMemo(() => visibleClients.reduce((s, c) => s + c.mrr, 0), [visibleClients]);
-  const totalAnno = useMemo(() => revenue.reduce((a, b) => a + b, 0), [revenue]);
-  const avgMese   = useMemo(() => Math.round(totalAnno / 12), [totalAnno]);
+  const { currentYearMonths, nextYearMonths } = getYearSplit();
+  const currentYear = new Date().getFullYear();
+  const nextYear    = currentYear + 1;
+
+  const totalMRR      = useMemo(() => visibleClients.reduce((s, c) => s + c.mrr, 0), [visibleClients]);
+  const totaleAnnoCorrente = useMemo(() => revenue.slice(0, currentYearMonths).reduce((a, b) => a + b, 0), [revenue, currentYearMonths]);
+  const totaleAnnoSucc     = useMemo(() => revenue.slice(currentYearMonths).reduce((a, b) => a + b, 0), [revenue, currentYearMonths]);
   const bestMese  = useMemo(() => Math.max(0, ...revenue), [revenue]);
-  const trendDir  = trend[11] > trend[0];
+  const trendDir  = trend.length > 1 ? trend[trend.length - 1] > trend[0] : false;
   const nAttivi   = useMemo(() => visibleClients.filter(c => c.mrr > 0).length, [visibleClients]);
 
   const onMesiChange = useCallback((updated) =>
@@ -148,10 +152,10 @@ export default function App() {
       {/* ── Metrics ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
         <MetricCard label="Clienti ricorrenti" value={nAttivi} sub={`di ${visibleClients.length} visualizzati`} />
-        <MetricCard label="MRR" value={fmt(totalMRR)} sub="mensile ricorrente" />
-        <MetricCard label="Media mensile" value={fmt(avgMese)} sub="proiezione 12 mesi" accent />
-        <MetricCard label="Picco annuale" value={fmt(bestMese)} sub="mese migliore" />
-        <MetricCard label="Totale annuo" value={fmt(totalAnno)} sub={
+        <MetricCard label="MRR attuale" value={fmt(totalMRR)} sub="mensile ricorrente" />
+        <MetricCard label={`Totale ${currentYear}`} value={fmt(totaleAnnoCorrente)} sub={`${currentYearMonths} mes${currentYearMonths === 1 ? 'e' : 'i'} rimanenti`} accent />
+        <MetricCard label={`Totale ${nextYear}`} value={fmt(totaleAnnoSucc)} sub="proiezione anno completo" accent />
+        <MetricCard label="Picco mensile" value={fmt(bestMese)} sub={
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {trendDir
               ? <TrendingUp size={11} color="var(--accent)" />
@@ -168,12 +172,16 @@ export default function App() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-            proiezione ricavi — prossimi 12 mesi
+            proiezione ricavi — {currentYear} / {nextYear}
           </p>
           <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.25)', display: 'inline-block' }} />
-              ricavi stimati
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.3)', display: 'inline-block' }} />
+              {currentYear}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(91,156,246,0.3)', display: 'inline-block' }} />
+              {nextYear}
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ width: '16px', borderTop: '2px dashed #f0924a', display: 'inline-block' }} />
@@ -181,7 +189,7 @@ export default function App() {
             </span>
           </div>
         </div>
-        <ForecastChart labels={labels} revenue={revenue} trend={trend} />
+        <ForecastChart labels={labels} revenue={revenue} trend={trend} yearSplit={currentYearMonths} />
       </div>
 
       {/* ── Table ── */}

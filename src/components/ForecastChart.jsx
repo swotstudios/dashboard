@@ -7,13 +7,21 @@ import {
 
 Chart.register(BarController, LineController, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
 
-export default function ForecastChart({ labels, revenue, trend }) {
+export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     if (chartRef.current) chartRef.current.destroy();
+
+    // Different colors for current year vs next year bars
+    const bgColors = revenue.map((_, i) =>
+      i < yearSplit ? 'rgba(200, 240, 74, 0.18)' : 'rgba(91, 156, 246, 0.18)'
+    );
+    const borderColors = revenue.map((_, i) =>
+      i < yearSplit ? '#c8f04a' : '#5b9cf6'
+    );
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
@@ -23,8 +31,8 @@ export default function ForecastChart({ labels, revenue, trend }) {
           {
             label: 'Fatturato stimato',
             data: revenue,
-            backgroundColor: 'rgba(200, 240, 74, 0.15)',
-            borderColor: '#c8f04a',
+            backgroundColor: bgColors,
+            borderColor: borderColors,
             borderWidth: 1,
             borderRadius: 4,
             order: 2,
@@ -92,7 +100,7 @@ export default function ForecastChart({ labels, revenue, trend }) {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '260px' }}>
-      <canvas ref={canvasRef} role="img" aria-label="Grafico proiezione fatturato mensile prossimi 12 mesi" />
+      <canvas ref={canvasRef} role="img" aria-label="Grafico proiezione fatturato per anno" />
     </div>
   );
 }
