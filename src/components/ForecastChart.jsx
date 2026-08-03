@@ -4,10 +4,22 @@ import {
   BarElement, LineElement, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js';
+import { fmtLabel } from '../lib/forecast.js';
 
-Chart.register(BarController, LineController, BarElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
+Chart.register(
+  BarController, LineController,
+  BarElement, LineElement, PointElement,
+  CategoryScale, LinearScale, Tooltip, Legend,
+);
 
-export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 }) {
+/**
+ * Props:
+ *  labels    – ['YYYY-MM', ...]
+ *  map       – { 'YYYY-MM': { real, proj100, proj40, unatantum } }
+ *  trend     – number[]  (same length as labels)
+ *  yearSplit – number of labels that belong to current year
+ */
+export default function ForecastChart({ labels, map, trend, yearSplit }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
 
@@ -15,27 +27,47 @@ export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 })
     if (!canvasRef.current) return;
     if (chartRef.current) chartRef.current.destroy();
 
-    // Different colors for current year vs next year bars
-    const bgColors = revenue.map((_, i) =>
-      i < yearSplit ? 'rgba(200, 240, 74, 0.18)' : 'rgba(91, 156, 246, 0.18)'
-    );
-    const borderColors = revenue.map((_, i) =>
-      i < yearSplit ? '#c8f04a' : '#5b9cf6'
-    );
+    const axisLabels = labels.map(fmtLabel);
+    const real     = labels.map(ym => map[ym]?.real     ?? 0);
+    const proj100  = labels.map(ym => map[ym]?.proj100  ?? 0);
+    const proj40   = labels.map(ym => map[ym]?.proj40   ?? 0);
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
       data: {
-        labels,
+        labels: axisLabels,
         datasets: [
           {
-            label: 'Fatturato stimato',
-            data: revenue,
-            backgroundColor: bgColors,
-            borderColor: borderColors,
+            label: 'Reale',
+            data: real,
+            backgroundColor: 'rgba(200, 240, 74, 0.75)',
+            borderColor: '#c8f04a',
             borderWidth: 1,
-            borderRadius: 4,
-            order: 2,
+            borderRadius: 3,
+            order: 3,
+          },
+          {
+            label: 'Proiettato 100%',
+            data: proj100,
+            backgroundColor: labels.map((_, i) =>
+              i < yearSplit ? 'rgba(200, 240, 74, 0.22)' : 'rgba(91, 156, 246, 0.30)'
+            ),
+            borderColor: labels.map((_, i) =>
+              i < yearSplit ? 'rgba(200, 240, 74, 0.6)' : 'rgba(91, 156, 246, 0.7)'
+            ),
+            borderWidth: 1,
+            borderRadius: 3,
+            order: 4,
+          },
+          {
+            label: 'Proiettato 40%',
+            data: proj40,
+            backgroundColor: 'rgba(91, 156, 246, 0.12)',
+            borderColor: 'rgba(91, 156, 246, 0.35)',
+            borderWidth: 1,
+            borderDash: [3, 3],
+            borderRadius: 3,
+            order: 5,
           },
           {
             label: 'Trendline',
@@ -65,24 +97,32 @@ export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 })
             padding: 10,
             callbacks: {
               label: (ctx) => {
-                if (ctx.dataset.label === 'Trendline') return `trend: €${ctx.parsed.y.toLocaleString('it-IT')}`;
-                return `stimato: €${ctx.parsed.y.toLocaleString('it-IT')}`;
+                const v = ctx.parsed.y;
+                if (!v) return null;
+                const f = '€' + Math.round(v).toLocaleString('it-IT');
+                if (ctx.dataset.label === 'Reale')           return `reale: ${f}`;
+                if (ctx.dataset.label === 'Proiettato 100%') return `proiezione 100%: ${f}`;
+                if (ctx.dataset.label === 'Proiettato 40%')  return `proiezione pesata 40%: ${f}`;
+                if (ctx.dataset.label === 'Trendline')       return `trend: ${f}`;
+                return null;
               },
             },
           },
         },
         scales: {
           x: {
+            stacked: false,
             grid: { display: false },
             border: { color: 'rgba(255,255,255,0.06)' },
             ticks: {
               color: '#6b6b6b',
-              font: { family: "'DM Mono', monospace", size: 11 },
+              font: { family: "'DM Mono', monospace", size: 10 },
               autoSkip: false,
               maxRotation: 45,
             },
           },
           y: {
+            stacked: false,
             grid: { color: 'rgba(255,255,255,0.04)' },
             border: { color: 'rgba(255,255,255,0.06)' },
             ticks: {
@@ -96,11 +136,11 @@ export default function ForecastChart({ labels, revenue, trend, yearSplit = 0 })
     });
 
     return () => chartRef.current?.destroy();
-  }, [labels, revenue, trend, yearSplit]);
+  }, [labels, map, trend, yearSplit]);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '260px' }}>
-      <canvas ref={canvasRef} role="img" aria-label="Grafico proiezione fatturato per anno" />
+    <div style={{ position: 'relative', width: '100%', height: '280px' }}>
+      <canvas ref={canvasRef} role="img" aria-label="Grafico proiezione fatturato mensile" />
     </div>
   );
 }

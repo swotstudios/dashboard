@@ -1,14 +1,17 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { ExternalLink } from 'lucide-react';
-import { MESI, MESI_SHORT } from '../lib/forecast.js';
 import { updateClient } from '../lib/notion.js';
 
 const STATO_COLOR = {
   'In corso':              { color: '#c8f04a', bg: 'rgba(200,240,74,0.1)' },
+  'Pagato':                { color: '#c8f04a', bg: 'rgba(200,240,74,0.1)' },
   'Da iniziare':           { color: '#5b9cf6', bg: 'rgba(91,156,246,0.1)' },
   'Da Pagare':             { color: '#f0924a', bg: 'rgba(240,146,74,0.1)' },
   'In attesa di risposta': { color: '#9b9b9b', bg: 'rgba(255,255,255,0.05)' },
+  'Da preventivare':       { color: '#9b9b9b', bg: 'rgba(255,255,255,0.05)' },
   'Terminato':             { color: '#444',    bg: 'rgba(255,255,255,0.03)' },
+  'Perso':                 { color: '#e05252', bg: 'rgba(224,82,82,0.08)' },
+  'Rifiutato':             { color: '#e05252', bg: 'rgba(224,82,82,0.08)' },
 };
 
 const SERVICE_COLORS = {
@@ -43,49 +46,46 @@ function StatoBadge({ stati }) {
   );
 }
 
+function fmtDate(str) {
+  if (!str) return null;
+  const [y, m] = str.split('-');
+  return `${m}/${y}`;
+}
+
 export default function ClientRow({ client, onChange }) {
   const [mrr, setMrr]         = useState(client.mrr);
-  const [mesi, setMesi]       = useState(client.mesiAttivi);
   const [saving, setSaving]   = useState(false);
   const [saveErr, setSaveErr] = useState(false);
-  const mesiTimer = useRef(null);
 
-  // Called with the full patch to send to Notion
-  const doSave = useCallback(async (patch) => {
+  const doSave = useCallback(async (val) => {
     setSaving(true);
     setSaveErr(false);
     try {
-      await updateClient(client.id, patch);
-      onChange({ ...client, ...patch });
+      await updateClient(client.id, { mrr: val });
+      onChange({ ...client, mrr: val });
     } catch (e) {
       console.error('save error', e);
       setSaveErr(true);
     } finally {
       setSaving(false);
     }
-  }, [client.id]); // stable: only depends on the page id
+  }, [client.id]);
 
-  // MRR: save on blur (when user leaves the field)
-  const handleMrrBlur = () => {
-    const val = parseFloat(mrr) || 0;
-    doSave({ mrr: val, mesiAttivi: mesi });
-  };
-
-  // Mesi: save 700ms after last toggle
-  const toggleMese = (mese) => {
-    setMesi(prev => {
-      const next = prev.includes(mese)
-        ? prev.filter(m => m !== mese)
-        : [...prev, mese];
-      clearTimeout(mesiTimer.current);
-      mesiTimer.current = setTimeout(() => {
-        doSave({ mrr: parseFloat(mrr) || 0, mesiAttivi: next });
-      }, 700);
-      return next;
-    });
-  };
+  const handleMrrBlur = () => doSave(parseFloat(mrr) || 0);
 
   const td = { padding: '10px 12px', borderBottom: '0.5px solid var(--border)', verticalAlign: 'middle' };
+
+  const periodoStr = (() => {
+    const start = fmtDate(client.dataInizio);
+    const end   = fmtDate(client.dataFine);
+    if (!start) return <span style={{ color: '#555', fontSize: '10px' }}>da compilare</span>;
+    if (!end)   return <span style={{ color: 'var(--muted)', fontSize: '11px' }}>{start} →</span>;
+    return <span style={{ color: 'var(--muted)', fontSize: '11px' }}>{start} – {end}</span>;
+  })();
+
+  const tipoColor = client.tipoRicavo === 'MRR ricorrente'
+    ? { color: '#c8f04a', bg: 'rgba(200,240,74,0.08)' }
+    : { color: '#f0924a', bg: 'rgba(240,146,74,0.08)' };
 
   return (
     <tr
@@ -102,6 +102,19 @@ export default function ClientRow({ client, onChange }) {
             <ExternalLink size={11} />
           </a>
         </div>
+      </td>
+
+      {/* Tipo ricavo */}
+      <td style={td}>
+        {client.tipoRicavo ? (
+          <span style={{
+            background: tipoColor.bg, color: tipoColor.color,
+            fontSize: '10px', fontWeight: 500, padding: '2px 7px',
+            borderRadius: '4px', whiteSpace: 'nowrap',
+          }}>
+            {client.tipoRicavo === 'MRR ricorrente' ? 'MRR' : '1×'}
+          </span>
+        ) : <span style={{ color: '#444', fontSize: '11px' }}>-</span>}
       </td>
 
       {/* Servizi */}
@@ -121,58 +134,34 @@ export default function ClientRow({ client, onChange }) {
       {/* MRR — editabile, salva su blur */}
       <td style={td}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>EUR</span>
-            <input
-              type="number"
-              value={mrr}
-              onChange={e => setMrr(e.target.value)}
-              onBlur={handleMrrBlur}
-              onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
-              min="0"
-              step="50"
-              placeholder="0"
-              style={{
-                width: '80px',
-                background: saveErr ? 'rgba(224,82,82,0.08)' : 'var(--surface2)',
-                border: `0.5px solid ${saveErr ? 'var(--red)' : 'var(--border2)'}`,
-                borderRadius: 'var(--radius)',
-                padding: '4px 8px',
-                color: 'var(--text)',
-                fontFamily: 'var(--mono)',
-                fontSize: '13px',
-              }}
-            />
-          </div>
-          {saving && (
-            <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>...</span>
-          )}
-          {saveErr && !saving && (
-            <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--red)' }}>err</span>
-          )}
+          <span style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>€</span>
+          <input
+            type="number"
+            value={mrr}
+            onChange={e => setMrr(e.target.value)}
+            onBlur={handleMrrBlur}
+            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+            min="0"
+            step="50"
+            placeholder="0"
+            style={{
+              width: '80px',
+              background: saveErr ? 'rgba(224,82,82,0.08)' : 'var(--surface2)',
+              border: `0.5px solid ${saveErr ? 'var(--red)' : 'var(--border2)'}`,
+              borderRadius: 'var(--radius)',
+              padding: '4px 8px',
+              color: 'var(--text)',
+              fontFamily: 'var(--mono)',
+              fontSize: '13px',
+            }}
+          />
+          {saving && <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>...</span>}
+          {saveErr && !saving && <span style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: 'var(--red)' }}>err</span>}
         </div>
       </td>
 
-      {/* Mesi Attivi — toggleable, auto-save */}
-      <td style={td}>
-        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {MESI.map((m, i) => {
-            const active = mesi.includes(m);
-            return (
-              <button key={m} onClick={() => toggleMese(m)} title={m} style={{
-                width: '24px', height: '20px', borderRadius: '3px',
-                border: `0.5px solid ${active ? 'var(--accent)' : 'rgba(255,255,255,0.1)'}`,
-                background: active ? 'rgba(200,240,74,0.12)' : 'transparent',
-                color: active ? 'var(--accent)' : 'rgba(255,255,255,0.18)',
-                fontSize: '8px', fontFamily: 'var(--mono)', fontWeight: 600,
-                cursor: 'pointer', transition: 'all .1s',
-              }}>
-                {MESI_SHORT[i][0]}
-              </button>
-            );
-          })}
-        </div>
-      </td>
+      {/* Periodo */}
+      <td style={td}>{periodoStr}</td>
     </tr>
   );
 }

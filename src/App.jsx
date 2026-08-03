@@ -4,9 +4,14 @@ import MetricCard from './components/MetricCard.jsx';
 import ForecastChart from './components/ForecastChart.jsx';
 import ClientRow from './components/ClientRow.jsx';
 import { fetchClients } from './lib/notion.js';
-import { buildForecast, buildLabels, getYearSplit, trendline, fmt } from './lib/forecast.js';
+import {
+  buildMonthlyRevenue, buildLabels, getYearSplit,
+  yearTotal, trendline, countActiveClients, currentMRR, fmt,
+} from './lib/forecast.js';
 
-const STATO_ATTIVO = new Set(['In corso', 'Da iniziare', 'Da Pagare', 'In attesa di risposta']);
+const STATO_ATTIVO = new Set([
+  'In corso', 'Da iniziare', 'Da Pagare', 'In attesa di risposta', 'Pagato',
+]);
 
 const pill = (active, color = '#c8f04a', bg = 'rgba(200,240,74,0.08)') => ({
   fontSize: '11px', fontFamily: 'var(--mono)',
@@ -64,27 +69,36 @@ export default function App() {
       ? clients.filter(c => c.stato.some(s => STATO_ATTIVO.has(s)))
       : clients;
     if (filterServizio) list = list.filter(c => c.servizi.includes(filterServizio));
-    if (filterTipo === 'ricorrente') list = list.filter(c => c.mrr > 0);
-    if (filterTipo === 'una tantum')  list = list.filter(c => c.mrr === 0);
+    if (filterTipo === 'ricorrente') list = list.filter(c => c.tipoRicavo === 'MRR ricorrente');
+    if (filterTipo === 'una tantum') list = list.filter(c => c.tipoRicavo === 'Una tantum');
     return list;
   }, [clients, filterStato, filterServizio, filterTipo]);
 
-  const revenue  = useMemo(() => buildForecast(visibleClients), [visibleClients]);
-  const labels   = useMemo(() => buildLabels(), []);
-  const trend    = useMemo(() => trendline(revenue), [revenue]);
-
-  const { currentYearMonths, nextYearMonths } = getYearSplit();
   const currentYear = new Date().getFullYear();
   const nextYear    = currentYear + 1;
 
-  const totalMRR      = useMemo(() => visibleClients.reduce((s, c) => s + c.mrr, 0), [visibleClients]);
-  const totaleAnnoCorrente = useMemo(() => revenue.slice(0, currentYearMonths).reduce((a, b) => a + b, 0), [revenue, currentYearMonths]);
-  const totaleAnnoSucc     = useMemo(() => revenue.slice(currentYearMonths).reduce((a, b) => a + b, 0), [revenue, currentYearMonths]);
-  const bestMese  = useMemo(() => Math.max(0, ...revenue), [revenue]);
-  const trendDir  = trend.length > 1 ? trend[trend.length - 1] > trend[0] : false;
-  const nAttivi   = useMemo(() => visibleClients.filter(c => c.mrr > 0).length, [visibleClients]);
+  const labels   = useMemo(() => buildLabels(), []);
+  const revenueMap = useMemo(() => buildMonthlyRevenue(visibleClients), [visibleClients]);
+  const trend    = useMemo(() => trendline(labels, revenueMap), [labels, revenueMap]);
+  const yearSplit = useMemo(() => getYearSplit(labels), [labels]);
 
-  const onMesiChange = useCallback((updated) =>
+  const mrr        = useMemo(() => currentMRR(clients), [clients]);
+  const nAttivi    = useMemo(() => countActiveClients(clients), [clients]);
+  const totaleCorrente = useMemo(() => yearTotal(revenueMap, labels, String(currentYear)), [revenueMap, labels, currentYear]);
+  const totaleSucc     = useMemo(() => yearTotal(revenueMap, labels, String(nextYear)),    [revenueMap, labels, nextYear]);
+  const totaleUnatantum = useMemo(() => {
+    return labels
+      .filter(ym => ym.startsWith(String(currentYear)))
+      .reduce((sum, ym) => sum + (revenueMap[ym]?.unatantum ?? 0), 0);
+  }, [revenueMap, labels, currentYear]);
+
+  const allRevenue = useMemo(() =>
+    labels.map(ym => (revenueMap[ym]?.real ?? 0) + (revenueMap[ym]?.proj100 ?? 0) + (revenueMap[ym]?.proj40 ?? 0)),
+  [revenueMap, labels]);
+  const bestMese = useMemo(() => Math.max(0, ...allRevenue), [allRevenue]);
+  const trendDir = trend.length > 1 ? trend[trend.length - 1] > trend[0] : false;
+
+  const onClientChange = useCallback((updated) =>
     setClients(prev => prev.map(c => c.id === updated.id ? updated : c)), []);
 
   return (
@@ -151,10 +165,11 @@ export default function App() {
 
       {/* ── Metrics ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
-        <MetricCard label="Clienti ricorrenti" value={nAttivi} sub={`di ${visibleClients.length} visualizzati`} />
-        <MetricCard label="MRR attuale" value={fmt(totalMRR)} sub="mensile ricorrente" />
-        <MetricCard label={`Totale ${currentYear}`} value={fmt(totaleAnnoCorrente)} sub={`${currentYearMonths} mes${currentYearMonths === 1 ? 'e' : 'i'} rimanenti`} accent />
-        <MetricCard label={`Totale ${nextYear}`} value={fmt(totaleAnnoSucc)} sub="proiezione anno completo" accent />
+        <MetricCard label="Clienti attivi" value={nAttivi} sub="MRR ricorrente oggi" />
+        <MetricCard label="MRR attuale" value={fmt(mrr)} sub="mensile ricorrente" />
+        <MetricCard label={`Totale ${currentYear}`} value={fmt(totaleCorrente)} sub="reale + proiettato" accent />
+        <MetricCard label={`Totale ${nextYear}`} value={fmt(totaleSucc)} sub="proiezione anno completo" accent />
+        <MetricCard label="Una tantum YTD" value={fmt(totaleUnatantum)} sub={`incassato ${currentYear}`} />
         <MetricCard label="Picco mensile" value={fmt(bestMese)} sub={
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {trendDir
@@ -172,16 +187,20 @@ export default function App() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-            proiezione ricavi — {currentYear} / {nextYear}
+            ricavi — {currentYear} / {nextYear}
           </p>
-          <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+          <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: 'var(--muted)', fontFamily: 'var(--mono)', flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.3)', display: 'inline-block' }} />
-              {currentYear}
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.8)', display: 'inline-block' }} />
+              reale
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(91,156,246,0.3)', display: 'inline-block' }} />
-              {nextYear}
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.22)', border: '0.5px solid rgba(200,240,74,0.6)', display: 'inline-block' }} />
+              proiettato 100%
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(91,156,246,0.12)', border: '0.5px solid rgba(91,156,246,0.35)', display: 'inline-block' }} />
+              proiettato 40%
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ width: '16px', borderTop: '2px dashed #f0924a', display: 'inline-block' }} />
@@ -189,7 +208,7 @@ export default function App() {
             </span>
           </div>
         </div>
-        <ForecastChart labels={labels} revenue={revenue} trend={trend} yearSplit={currentYearMonths} />
+        <ForecastChart labels={labels} map={revenueMap} trend={trend} yearSplit={yearSplit} />
       </div>
 
       {/* ── Table ── */}
@@ -205,7 +224,7 @@ export default function App() {
             clienti · {visibleClients.length} risultati
           </p>
           <p style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: '#444' }}>
-            i mesi attivi aggiornano la proiezione
+            dati da notion in tempo reale
           </p>
         </div>
 
@@ -222,7 +241,7 @@ export default function App() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['cliente', 'servizio', 'stato', 'mrr / mese', 'mesi attivi'].map(h => (
+                  {['cliente', 'tipo', 'servizio', 'stato', 'mrr / importo', 'periodo'].map(h => (
                     <th key={h} style={{
                       padding: '8px 12px', fontSize: '10px', fontFamily: 'var(--mono)',
                       letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)',
@@ -233,7 +252,7 @@ export default function App() {
               </thead>
               <tbody>
                 {visibleClients.map(c => (
-                  <ClientRow key={`${c.id}-${reloadKey}`} client={c} onChange={onMesiChange} />
+                  <ClientRow key={`${c.id}-${reloadKey}`} client={c} onChange={onClientChange} />
                 ))}
               </tbody>
             </table>

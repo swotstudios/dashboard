@@ -64,14 +64,17 @@ export default async function handler(req, res) {
     const clients = allResults.map(page => {
       const p = page.properties;
       return {
-        id:          page.id,
-        nome:        p.Cliente?.title?.[0]?.plain_text ?? '—',
-        servizi:     p.Servizio?.multi_select?.map(s => s.name) ?? [],
-        stato:       p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
-        mrr:         p.MRR?.number ?? 0,
-        mesiAttivi:  p['Mesi Attivi']?.multi_select?.map(s => s.name) ?? [],
-        categoria:   p.Categoria?.multi_select?.map(s => s.name) ?? [],
-        notionUrl:   page.url,
+        id:           page.id,
+        nome:         p.Cliente?.title?.[0]?.plain_text ?? '—',
+        servizi:      p.Servizio?.multi_select?.map(s => s.name) ?? [],
+        stato:        p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
+        mrr:          p.MRR?.number ?? 0,
+        tipoRicavo:   p['Tipo Ricavo']?.select?.name ?? null,
+        dataInizio:   p['Data inizio periodo']?.date?.start ?? null,
+        dataFine:     p['Data fine periodo']?.date?.start ?? null,
+        dataIncasso:  p['Data incasso']?.date?.start ?? null,
+        categoria:    p.Categoria?.multi_select?.map(s => s.name) ?? [],
+        notionUrl:    page.url,
       };
     });
 
