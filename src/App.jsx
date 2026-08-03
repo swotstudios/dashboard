@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 import MetricCard from './components/MetricCard.jsx';
 import ForecastChart from './components/ForecastChart.jsx';
-import ClientRow from './components/ClientRow.jsx';
-import { fetchClients } from './lib/notion.js';
+import ClientTable from './components/ClientTable.jsx';
+import { fetchData } from './lib/notion.js';
 import {
-  buildMonthlyRevenue, buildLabels, getYearSplit,
-  yearTotal, trendline, countActiveClients, currentMRR, fmt,
+  buildMonthlyRevenue, buildUnatantum, buildLabels, getYearSplit,
+  yearTotal, yearUnatantum, peakMonth, trendline,
+  currentMRR, countActiveClients, buildClientSummary, fmt,
 } from './lib/forecast.js';
 
 const STATO_ATTIVO = new Set([
@@ -34,21 +35,20 @@ const LABEL = ({ children }) => (
 );
 
 export default function App() {
-  const [clients, setClients]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [filterStato, setFilterStato]       = useState('attivi');
+  const [fatture, setFatture]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+
+  const [filterTipoVoce, setFilterTipoVoce] = useState(null);   // null=tutti
   const [filterServizio, setFilterServizio] = useState(null);
-  const [filterTipo, setFilterTipo]         = useState(null);
+  const [filterStato, setFilterStato]       = useState('attivi'); // 'attivi'|'tutti'
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchClients();
-      setClients(data);
-      setReloadKey(k => k + 1);
+      const { fatture: f } = await fetchData();
+      setFatture(f);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -58,51 +58,81 @@ export default function App() {
 
   useEffect(() => { load(); }, []);
 
+  // All distinct services across fatture
   const allServizi = useMemo(() => {
-    const set = new Set();
-    clients.forEach(c => c.servizi.forEach(s => set.add(s)));
-    return [...set].sort();
-  }, [clients]);
+    const s = new Set();
+    fatture.forEach(f => f.servizi.forEach(v => s.add(v)));
+    return [...s].sort();
+  }, [fatture]);
 
-  const visibleClients = useMemo(() => {
-    let list = filterStato === 'attivi'
-      ? clients.filter(c => c.stato.some(s => STATO_ATTIVO.has(s)))
-      : clients;
-    if (filterServizio) list = list.filter(c => c.servizi.includes(filterServizio));
-    if (filterTipo === 'ricorrente') list = list.filter(c => c.tipoRicavo === 'MRR ricorrente');
-    if (filterTipo === 'una tantum') list = list.filter(c => c.tipoRicavo === 'Una tantum');
+  // Apply filters
+  const filteredFatture = useMemo(() => {
+    let list = fatture;
+    if (filterStato === 'attivi') {
+      list = list.filter(f => f.statoLavori.some(s => STATO_ATTIVO.has(s)));
+    }
+    if (filterServizio) {
+      list = list.filter(f => f.servizi.includes(filterServizio));
+    }
+    if (filterTipoVoce) {
+      list = list.filter(f => f.tipoVoce === filterTipoVoce);
+    }
     return list;
-  }, [clients, filterStato, filterServizio, filterTipo]);
+  }, [fatture, filterStato, filterServizio, filterTipoVoce]);
 
   const currentYear = new Date().getFullYear();
   const nextYear    = currentYear + 1;
 
-  const labels   = useMemo(() => buildLabels(), []);
-  const revenueMap = useMemo(() => buildMonthlyRevenue(visibleClients), [visibleClients]);
-  const trend    = useMemo(() => trendline(labels, revenueMap), [labels, revenueMap]);
+  const labels    = useMemo(() => buildLabels(), []);
   const yearSplit = useMemo(() => getYearSplit(labels), [labels]);
 
-  const mrr        = useMemo(() => currentMRR(clients), [clients]);
-  const nAttivi    = useMemo(() => countActiveClients(clients), [clients]);
-  const totaleCorrente = useMemo(() => yearTotal(revenueMap, labels, String(currentYear)), [revenueMap, labels, currentYear]);
-  const totaleSucc     = useMemo(() => yearTotal(revenueMap, labels, String(nextYear)),    [revenueMap, labels, nextYear]);
-  const totaleUnatantum = useMemo(() => {
-    return labels
-      .filter(ym => ym.startsWith(String(currentYear)))
-      .reduce((sum, ym) => sum + (revenueMap[ym]?.unatantum ?? 0), 0);
-  }, [revenueMap, labels, currentYear]);
+  // Use all fatture for global metrics (not filtered), filtered for chart/table
+  const mrrFatture = useMemo(() =>
+    filterTipoVoce === 'Una tantum' ? [] : filteredFatture,
+  [filteredFatture, filterTipoVoce]);
 
-  const allRevenue = useMemo(() =>
-    labels.map(ym => (revenueMap[ym]?.real ?? 0) + (revenueMap[ym]?.proj100 ?? 0) + (revenueMap[ym]?.proj40 ?? 0)),
-  [revenueMap, labels]);
-  const bestMese = useMemo(() => Math.max(0, ...allRevenue), [allRevenue]);
-  const trendDir = trend.length > 1 ? trend[trend.length - 1] > trend[0] : false;
+  const utFatture = useMemo(() =>
+    filterTipoVoce === 'MRR ricorrente' ? [] : filteredFatture,
+  [filteredFatture, filterTipoVoce]);
 
-  const onClientChange = useCallback((updated) =>
-    setClients(prev => prev.map(c => c.id === updated.id ? updated : c)), []);
+  const revenueMap = useMemo(() => buildMonthlyRevenue(mrrFatture), [mrrFatture]);
+  const utMap      = useMemo(() => buildUnatantum(utFatture),       [utFatture]);
+  const trend      = useMemo(() => trendline(labels, revenueMap),   [labels, revenueMap]);
+
+  // Metrics (always from unfiltered-by-tipoVoce for global cards)
+  const allMrrFatture = useMemo(() => {
+    let list = fatture;
+    if (filterStato === 'attivi') list = list.filter(f => f.statoLavori.some(s => STATO_ATTIVO.has(s)));
+    if (filterServizio) list = list.filter(f => f.servizi.includes(filterServizio));
+    return list;
+  }, [fatture, filterStato, filterServizio]);
+
+  const mrr        = useMemo(() => currentMRR(allMrrFatture),        [allMrrFatture]);
+  const nAttivi    = useMemo(() => countActiveClients(allMrrFatture), [allMrrFatture]);
+  const allRevMap  = useMemo(() => buildMonthlyRevenue(allMrrFatture), [allMrrFatture]);
+  const allUtMap   = useMemo(() => buildUnatantum(allMrrFatture),      [allMrrFatture]);
+
+  const { real: real26, proj: proj26, total: tot26 } = useMemo(
+    () => yearTotal(allRevMap, labels, String(currentYear)), [allRevMap, labels, currentYear]
+  );
+  const { total: tot27 } = useMemo(
+    () => yearTotal(allRevMap, labels, String(nextYear)), [allRevMap, labels, nextYear]
+  );
+  const ut26 = useMemo(
+    () => yearUnatantum(allUtMap, labels, String(currentYear)), [allUtMap, labels, currentYear]
+  );
+  const peak = useMemo(() => peakMonth(allRevMap, labels), [allRevMap, labels]);
+  const trend0 = useMemo(() => trendline(labels, allRevMap), [labels, allRevMap]);
+  const trendDir = trend0.length > 1 ? trend0[trend0.length - 1] > trend0[0] : false;
+
+  // Client table summaries (MRR ricorrente only, apply stato+servizio filters)
+  const clientSummaries = useMemo(
+    () => buildClientSummary(allMrrFatture),
+    [allMrrFatture]
+  );
 
   return (
-    <div style={{ maxWidth: '1160px', margin: '0 auto', padding: '2rem 1.5rem' }}>
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 1.5rem' }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
@@ -138,20 +168,19 @@ export default function App() {
 
         <SEP />
 
-        <LABEL>servizio</LABEL>
-        <button onClick={() => setFilterServizio(null)} style={pill(filterServizio === null, '#5b9cf6', 'rgba(91,156,246,0.08)')}>tutti</button>
+        <LABEL>tipo voce</LABEL>
+        <button onClick={() => setFilterTipoVoce(null)} style={pill(filterTipoVoce === null, '#5b9cf6', 'rgba(91,156,246,0.08)')}>tutti</button>
+        <button onClick={() => setFilterTipoVoce('MRR ricorrente')} style={pill(filterTipoVoce === 'MRR ricorrente', '#5b9cf6', 'rgba(91,156,246,0.08)')}>mrr ricorrente</button>
+        <button onClick={() => setFilterTipoVoce('Una tantum')} style={pill(filterTipoVoce === 'Una tantum', '#5b9cf6', 'rgba(91,156,246,0.08)')}>una tantum</button>
+
+        {allServizi.length > 0 && <SEP />}
+
+        {allServizi.length > 0 && <LABEL>servizio</LABEL>}
+        {allServizi.length > 0 && (
+          <button onClick={() => setFilterServizio(null)} style={pill(filterServizio === null, '#f0924a', 'rgba(240,146,74,0.08)')}>tutti</button>
+        )}
         {allServizi.map(s => (
-          <button key={s} onClick={() => setFilterServizio(s)} style={pill(filterServizio === s, '#5b9cf6', 'rgba(91,156,246,0.08)')}>{s}</button>
-        ))}
-
-        <SEP />
-
-        <LABEL>tipo</LABEL>
-        {[null, 'ricorrente', 'una tantum'].map(t => (
-          <button key={t ?? '__all__'} onClick={() => setFilterTipo(t)}
-            style={pill(filterTipo === t, '#f0924a', 'rgba(240,146,74,0.08)')}>
-            {t ?? 'tutti'}
-          </button>
+          <button key={s} onClick={() => setFilterServizio(s)} style={pill(filterServizio === s, '#f0924a', 'rgba(240,146,74,0.08)')}>{s}</button>
         ))}
       </div>
 
@@ -164,13 +193,18 @@ export default function App() {
       )}
 
       {/* ── Metrics ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
-        <MetricCard label="Clienti attivi" value={nAttivi} sub="MRR ricorrente oggi" />
-        <MetricCard label="MRR attuale" value={fmt(mrr)} sub="mensile ricorrente" />
-        <MetricCard label={`Totale ${currentYear}`} value={fmt(totaleCorrente)} sub="reale + proiettato" accent />
-        <MetricCard label={`Totale ${nextYear}`} value={fmt(totaleSucc)} sub="proiezione anno completo" accent />
-        <MetricCard label="Una tantum YTD" value={fmt(totaleUnatantum)} sub={`incassato ${currentYear}`} />
-        <MetricCard label="Picco mensile" value={fmt(bestMese)} sub={
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
+        <MetricCard label="Clienti attivi" value={nAttivi} sub="MRR ricorrente oggi o futuro" />
+        <MetricCard label="MRR corrente" value={fmt(mrr)} sub="mese in corso" />
+        <MetricCard
+          label={`Totale ${currentYear}`}
+          value={fmt(tot26)}
+          sub={`${fmt(real26)} reale + ${fmt(proj26)} previsto`}
+          accent
+        />
+        <MetricCard label={`Totale ${nextYear}`} value={fmt(tot27)} sub="proiezione anno completo" accent />
+        <MetricCard label={`Una tantum ${currentYear}`} value={fmt(ut26)} sub="extra / spot" />
+        <MetricCard label="Picco mensile" value={fmt(peak)} sub={
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {trendDir
               ? <TrendingUp size={11} color="var(--accent)" />
@@ -180,88 +214,22 @@ export default function App() {
         } />
       </div>
 
-      {/* ── Chart ── */}
-      <div style={{
-        background: 'var(--surface)', border: '0.5px solid var(--border)',
-        borderRadius: 'var(--radius-lg)', padding: '1.25rem', marginBottom: '1.25rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-          <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-            ricavi — {currentYear} / {nextYear}
-          </p>
-          <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: 'var(--muted)', fontFamily: 'var(--mono)', flexWrap: 'wrap' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.8)', display: 'inline-block' }} />
-              reale
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(200,240,74,0.22)', border: '0.5px solid rgba(200,240,74,0.6)', display: 'inline-block' }} />
-              proiettato 100%
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(91,156,246,0.12)', border: '0.5px solid rgba(91,156,246,0.35)', display: 'inline-block' }} />
-              proiettato 40%
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '16px', borderTop: '2px dashed #f0924a', display: 'inline-block' }} />
-              trend
-            </span>
-          </div>
-        </div>
-        <ForecastChart labels={labels} map={revenueMap} trend={trend} yearSplit={yearSplit} />
+      {/* ── Charts ── */}
+      <div style={{ marginBottom: '1.25rem' }}>
+        <ForecastChart
+          labels={labels}
+          map={revenueMap}
+          utMap={utMap}
+          trend={trend}
+          yearSplit={yearSplit}
+        />
       </div>
 
-      {/* ── Table ── */}
-      <div style={{
-        background: 'var(--surface)', border: '0.5px solid var(--border)',
-        borderRadius: 'var(--radius-lg)', overflow: 'hidden',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '.875rem 1.25rem', borderBottom: '0.5px solid var(--border)',
-        }}>
-          <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-            clienti · {visibleClients.length} risultati
-          </p>
-          <p style={{ fontSize: '10px', fontFamily: 'var(--mono)', color: '#444' }}>
-            dati da notion in tempo reale
-          </p>
-        </div>
-
-        {loading ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>
-            caricamento da notion…
-          </div>
-        ) : visibleClients.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: '12px' }}>
-            nessun cliente per i filtri selezionati
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {['cliente', 'tipo', 'servizio', 'stato', 'mrr / importo', 'periodo'].map(h => (
-                    <th key={h} style={{
-                      padding: '8px 12px', fontSize: '10px', fontFamily: 'var(--mono)',
-                      letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)',
-                      borderBottom: '0.5px solid var(--border)', textAlign: 'left', fontWeight: 400,
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleClients.map(c => (
-                  <ClientRow key={`${c.id}-${reloadKey}`} client={c} onChange={onClientChange} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* ── Client Table ── */}
+      <ClientTable summaries={clientSummaries} loading={loading} />
 
       <p style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '10px', fontFamily: 'var(--mono)', color: 'rgba(255,255,255,0.12)' }}>
-        swotstudios · dati notion in tempo reale
+        swotstudios · fonte: notion / fatture
       </p>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

@@ -1,17 +1,10 @@
-// ── constants ──────────────────────────────────────────────────────────────────
+// ── configurable weights ───────────────────────────────────────────────────────
+export const PESO_PREVISIONALE = 0.40;
 
+// ── constants ──────────────────────────────────────────────────────────────────
 export const MESI_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 
-const STATO_PESO = {
-  'In corso':                 1.0,
-  'Pagato':                   1.0,
-  'Da Pagare':                1.0,
-  'In attesa di risposta':    0.4,
-  'Da preventivare':          0.4,
-  'Perso':                    0,
-  'Rifiutato':                0,
-  'Non ha più fatto sapere':  0,
-};
+const STATI_PROJ100 = new Set(['Da emettere', 'Emessa', 'Incassata']);
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -19,86 +12,16 @@ function toYM(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function parseDate(str) {
-  const [y, m] = str.split('-').map(Number);
+export function currentYM() {
+  return toYM(new Date());
+}
+
+function parseDate(ym) {
+  const [y, m] = ym.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, 15));
 }
 
-function monthsInRange(startStr, endStr) {
-  const start = parseDate(startStr);
-  const end   = parseDate(endStr);
-  const out = [];
-  const cur = new Date(start);
-  while (cur <= end) {
-    out.push(toYM(cur));
-    cur.setUTCMonth(cur.getUTCMonth() + 1);
-  }
-  return out;
-}
-
-function pesoStato(stati) {
-  for (const s of stati) {
-    if (s in STATO_PESO) return STATO_PESO[s];
-  }
-  return 1.0;
-}
-
-// ── core ───────────────────────────────────────────────────────────────────────
-
-/**
- * Builds a map { 'YYYY-MM': { real, proj100, proj40, unatantum } }
- * covering Jan of current year → Dec of next year.
- */
-export function buildMonthlyRevenue(clients) {
-  const now       = new Date();
-  const currentYM = toYM(now);
-  const endYM     = `${now.getFullYear() + 1}-12`;
-
-  const map = {};
-
-  const ensure = (ym) => {
-    if (!map[ym]) map[ym] = { real: 0, proj100: 0, proj40: 0, unatantum: 0 };
-  };
-
-  for (const c of clients) {
-    // ── Una tantum ─────────────────────────────────────────────────────────
-    if (c.tipoRicavo === 'Una tantum') {
-      if (!c.dataIncasso) continue;
-      const ym = c.dataIncasso.slice(0, 7);
-      ensure(ym);
-      map[ym].unatantum += c.mrr;
-      continue;
-    }
-
-    // ── MRR ricorrente ─────────────────────────────────────────────────────
-    if (c.tipoRicavo !== 'MRR ricorrente') continue;
-    if (!c.dataInizio) continue;
-
-    const peso = pesoStato(c.stato);
-    if (peso === 0) continue;
-
-    const endStr = c.dataFine ?? endYM;
-    const months = monthsInRange(c.dataInizio, endStr);
-
-    for (const ym of months) {
-      if (ym > endYM) break;
-      ensure(ym);
-      if (ym <= currentYM) {
-        map[ym].real += c.mrr;
-      } else if (peso >= 1.0) {
-        map[ym].proj100 += c.mrr;
-      } else {
-        map[ym].proj40 += c.mrr * peso;
-      }
-    }
-  }
-
-  return map;
-}
-
-/**
- * Sorted array of 'YYYY-MM' from Jan current year → Dec next year (continuous axis).
- */
+/** Continuous axis Jan current year → Dec next year */
 export function buildLabels() {
   const now     = new Date();
   const startYM = `${now.getFullYear()}-01`;
@@ -113,30 +36,128 @@ export function buildLabels() {
   return out;
 }
 
-/** Human label for chart axis */
+/** How many labels belong to the current year */
+export function getYearSplit(labels) {
+  const y = String(new Date().getFullYear());
+  return labels.filter(l => l.startsWith(y)).length;
+}
+
+/** Human readable axis label from YYYY-MM */
 export function fmtLabel(ym) {
   const [y, m] = ym.split('-').map(Number);
   return `${MESI_SHORT[m - 1]} '${String(y).slice(2)}`;
 }
 
-/** How many labels belong to current year */
-export function getYearSplit(labels) {
-  const currentYear = String(new Date().getFullYear());
-  return labels.filter(ym => ym.startsWith(currentYear)).length;
+export function fmt(n) {
+  return '€' + Math.round(n).toLocaleString('it-IT');
 }
 
-/** Sum of all revenue (real + projected weighted) for a given year string */
+// ── core aggregation ───────────────────────────────────────────────────────────
+
+/**
+ * Builds { 'YYYY-MM': { real, proj100, proj40 } } from MRR ricorrente rows only.
+ * No implicit projection: only rows that exist in Fatture count.
+ */
+export function buildMonthlyRevenue(fatture) {
+  const now = currentYM();
+  const map = {};
+
+  const ensure = ym => { if (!map[ym]) map[ym] = { real: 0, proj100: 0, proj40: 0 }; };
+
+  for (const f of fatture) {
+    if (f.tipoVoce !== 'MRR ricorrente') continue;
+    if (!f.meseCompetenza) continue;
+    const ym = f.meseCompetenza;
+    ensure(ym);
+    if (ym <= now) {
+      map[ym].real += f.importo;
+    } else if (f.stato === 'Previsionale') {
+      map[ym].proj40 += f.importo * PESO_PREVISIONALE;
+    } else if (STATI_PROJ100.has(f.stato)) {
+      map[ym].proj100 += f.importo;
+    }
+    // stato null or unknown → skip
+  }
+
+  return map;
+}
+
+/**
+ * Builds { 'YYYY-MM': number } from Una tantum rows only.
+ * Always 100% (real if past, proj100 if future with confirmed stato, proj40 if Previsionale).
+ * Returned flat as total-per-month for the separate display.
+ */
+export function buildUnatantum(fatture) {
+  const now = currentYM();
+  const map = {};
+  for (const f of fatture) {
+    if (f.tipoVoce !== 'Una tantum') continue;
+    if (!f.meseCompetenza) continue;
+    const ym = f.meseCompetenza;
+    if (!map[ym]) map[ym] = { real: 0, proj100: 0, proj40: 0 };
+    if (ym <= now) {
+      map[ym].real += f.importo;
+    } else if (f.stato === 'Previsionale') {
+      map[ym].proj40 += f.importo * PESO_PREVISIONALE;
+    } else if (STATI_PROJ100.has(f.stato)) {
+      map[ym].proj100 += f.importo;
+    }
+  }
+  return map;
+}
+
+/** MRR attuale = sum of MRR ricorrente rows for current month */
+export function currentMRR(fatture) {
+  const now = currentYM();
+  return fatture
+    .filter(f => f.tipoVoce === 'MRR ricorrente' && f.meseCompetenza === now)
+    .reduce((s, f) => s + f.importo, 0);
+}
+
+/** DISTINCT clienti with at least one MRR ricorrente row in current month or future */
+export function countActiveClients(fatture) {
+  const now = currentYM();
+  const names = new Set();
+  for (const f of fatture) {
+    if (f.tipoVoce === 'MRR ricorrente' && f.meseCompetenza >= now) {
+      names.add(f.cliente);
+    }
+  }
+  return names.size;
+}
+
+/** Sum of all revenue (real + proj100 + proj40) for a given year string */
 export function yearTotal(map, labels, year) {
+  let real = 0, proj = 0;
+  for (const ym of labels) {
+    if (!ym.startsWith(year)) continue;
+    const b = map[ym];
+    if (!b) continue;
+    real += b.real;
+    proj += b.proj100 + b.proj40;
+  }
+  return { real, proj, total: real + proj };
+}
+
+/** Una tantum total for a given year */
+export function yearUnatantum(utMap, labels, year) {
   return labels
     .filter(ym => ym.startsWith(year))
-    .reduce((sum, ym) => {
-      const b = map[ym];
-      if (!b) return sum;
-      return sum + b.real + b.proj100 + b.proj40;
+    .reduce((s, ym) => {
+      const b = utMap[ym];
+      return b ? s + b.real + b.proj100 + b.proj40 : s;
     }, 0);
 }
 
-/** Trendline (linear regression) over real + proj100 only */
+/** Best single month (real + proj100 + proj40) */
+export function peakMonth(map, labels) {
+  return Math.max(0, ...labels.map(ym => {
+    const b = map[ym];
+    return b ? b.real + b.proj100 + b.proj40 : 0;
+  }));
+}
+
+/** Linear trendline over real + proj100 only */
 export function trendline(labels, map) {
   const data = labels.map(ym => (map[ym]?.real ?? 0) + (map[ym]?.proj100 ?? 0));
   const n = data.length;
@@ -152,32 +173,55 @@ export function trendline(labels, map) {
   return data.map((_, i) => Math.max(0, Math.round(slope * i + intercept)));
 }
 
-/** Count distinct client names with an active MRR period today */
-export function countActiveClients(clients) {
-  const now   = toYM(new Date());
-  const names = new Set();
-  for (const c of clients) {
-    if (c.tipoRicavo !== 'MRR ricorrente') continue;
-    if (!c.dataInizio) continue;
-    const start = c.dataInizio.slice(0, 7);
-    const end   = c.dataFine ? c.dataFine.slice(0, 7) : '9999-12';
-    if (start <= now && now <= end) names.add(c.nome);
+/**
+ * Per-client summary for the table.
+ * Returns array of { cliente, servizi, statoLavori, mrrCorrente, prossimi3 }
+ * where prossimi3 = [{ ym, importo, peso }] for the next 3 months after today.
+ */
+export function buildClientSummary(fatture) {
+  const now = currentYM();
+
+  // Collect next 3 month keys
+  const next3 = [];
+  const cur = parseDate(now);
+  cur.setUTCMonth(cur.getUTCMonth() + 1);
+  for (let i = 0; i < 3; i++) {
+    next3.push(toYM(cur));
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
   }
-  return names.size;
-}
 
-/** Current MRR: sum of mrr for clients with an active period today */
-export function currentMRR(clients) {
-  const now = toYM(new Date());
-  return clients.reduce((sum, c) => {
-    if (c.tipoRicavo !== 'MRR ricorrente') return sum;
-    if (!c.dataInizio) return sum;
-    const start = c.dataInizio.slice(0, 7);
-    const end   = c.dataFine ? c.dataFine.slice(0, 7) : '9999-12';
-    return (start <= now && now <= end) ? sum + c.mrr : sum;
-  }, 0);
-}
+  // Group by progettoId
+  const byProgetto = {};
+  for (const f of fatture) {
+    if (f.tipoVoce !== 'MRR ricorrente') continue;
+    if (!f.progettoId) continue;
+    if (!byProgetto[f.progettoId]) {
+      byProgetto[f.progettoId] = {
+        cliente:     f.cliente,
+        servizi:     f.servizi,
+        statoLavori: f.statoLavori,
+        notionUrl:   f.notionUrl,
+        rows:        [],
+      };
+    }
+    byProgetto[f.progettoId].rows.push(f);
+  }
 
-export function fmt(n) {
-  return '€' + Math.round(n).toLocaleString('it-IT');
+  return Object.values(byProgetto).map(({ cliente, servizi, statoLavori, notionUrl, rows }) => {
+    const mrrCorrente = rows
+      .filter(f => f.meseCompetenza === now)
+      .reduce((s, f) => s + f.importo, 0);
+
+    const prossimi3 = next3.map(ym => {
+      const f = rows.find(r => r.meseCompetenza === ym);
+      if (!f) return { ym, importo: 0, peso: 0, stato: null };
+      const peso = f.meseCompetenza <= now ? 1
+        : f.stato === 'Previsionale' ? PESO_PREVISIONALE
+        : STATI_PROJ100.has(f.stato) ? 1
+        : 0;
+      return { ym, importo: f.importo, peso, stato: f.stato };
+    });
+
+    return { cliente, servizi, statoLavori, notionUrl, mrrCorrente, prossimi3 };
+  }).sort((a, b) => a.cliente.localeCompare(b.cliente));
 }

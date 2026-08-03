@@ -1,37 +1,17 @@
-// api/notion.js — Vercel Serverless Function
-
-function readRawBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
-  });
-}
-
-async function parseBody(req) {
-  // Vercel may auto-parse as object, or leave as string/stream
-  if (req.body !== undefined && req.body !== null && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return req.body;
-  }
-  const raw = Buffer.isBuffer(req.body)
-    ? req.body.toString('utf8')
-    : typeof req.body === 'string'
-    ? req.body
-    : await readRawBody(req);
-  return JSON.parse(raw || '{}');
-}
+// api/notion.js — Vercel Serverless Function (read-only)
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const NOTION_TOKEN = process.env.NOTION_TOKEN;
-  const DATABASE_ID  = process.env.NOTION_DATABASE_ID;
+  const NOTION_TOKEN    = process.env.NOTION_TOKEN;
+  const PROGETTI_DB_ID  = process.env.NOTION_DATABASE_ID;
+  const FATTURE_DB_ID   = process.env.NOTION_FATTURE_DB_ID;
 
-  if (!NOTION_TOKEN || !DATABASE_ID) {
+  if (!NOTION_TOKEN || !PROGETTI_DB_ID || !FATTURE_DB_ID) {
     return res.status(500).json({ error: 'Missing env vars' });
   }
 
@@ -41,76 +21,97 @@ export default async function handler(req, res) {
     'Content-Type': 'application/json',
   };
 
-  // ── GET → list all clients ──────────────────────────────────────────────
-  if (req.method === 'GET') {
-    let allResults = [];
+  async function queryAll(dbId, extraBody = {}) {
+    const results = [];
     let cursor;
-
     do {
-      const body = {
-        page_size: 100,
-        sorts: [{ property: 'Cliente', direction: 'ascending' }],
-        ...(cursor ? { start_cursor: cursor } : {}),
-      };
-      const r = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
+      const body = { page_size: 100, ...extraBody, ...(cursor ? { start_cursor: cursor } : {}) };
+      const r = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
         method: 'POST', headers, body: JSON.stringify(body),
       });
-      if (!r.ok) return res.status(r.status).json(await r.json());
+      if (!r.ok) {
+        const err = await r.json();
+        throw { status: r.status, body: err };
+      }
       const data = await r.json();
-      allResults = allResults.concat(data.results);
+      results.push(...data.results);
       cursor = data.has_more ? data.next_cursor : undefined;
     } while (cursor);
+    return results;
+  }
 
-    const clients = allResults.map(page => {
+  try {
+    // Fetch Progetti and Fatture in parallel
+    const [progettiRaw, fattureRaw] = await Promise.all([
+      queryAll(PROGETTI_DB_ID, { sorts: [{ property: 'Cliente', direction: 'ascending' }] }),
+      queryAll(FATTURE_DB_ID,  { sorts: [{ property: 'Mese di competenza', direction: 'ascending' }] }),
+    ]);
+
+    // Build progetti lookup map: pageId → { nome, servizi, stato, categoria, notionUrl }
+    const progettiMap = {};
+    for (const page of progettiRaw) {
       const p = page.properties;
+      progettiMap[page.id] = {
+        nome:      p.Cliente?.title?.[0]?.plain_text ?? '—',
+        servizi:   p.Servizio?.multi_select?.map(s => s.name) ?? [],
+        stato:     p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
+        categoria: p.Categoria?.multi_select?.map(s => s.name) ?? [],
+        notionUrl: page.url,
+      };
+    }
+
+    // Map Fatture rows, denormalising the Progetto relation
+    const fatture = fattureRaw.map(page => {
+      const p = page.properties;
+
+      // Relation returns an array of { id }
+      const progettoId = p.Progetto?.relation?.[0]?.id ?? null;
+      const progetto   = progettoId ? progettiMap[progettoId] : null;
+
+      // Mese di competenza: date field, we only need YYYY-MM
+      const meseRaw = p['Mese di competenza']?.date?.start ?? null;
+      const meseCompetenza = meseRaw ? meseRaw.slice(0, 7) : null;
+
       return {
-        id:           page.id,
-        nome:         p.Cliente?.title?.[0]?.plain_text ?? '—',
-        servizi:      p.Servizio?.multi_select?.map(s => s.name) ?? [],
-        stato:        p['Stato Lavori']?.multi_select?.map(s => s.name) ?? [],
-        mrr:          p.MRR?.number ?? 0,
-        tipoRicavo:   p['Tipo Ricavo']?.select?.name ?? null,
-        dataInizio:   p['Data inizio periodo']?.date?.start ?? null,
-        dataFine:     p['Data fine periodo']?.date?.start ?? null,
-        dataIncasso:  p['Data incasso']?.date?.start ?? null,
-        categoria:    p.Categoria?.multi_select?.map(s => s.name) ?? [],
-        notionUrl:    page.url,
+        id:             page.id,
+        progettoId,
+        tipoVoce:       p['Tipo Voce']?.select?.name ?? null,
+        meseCompetenza,
+        importo:        p['Importo']?.number ?? 0,
+        stato:          p['Stato']?.select?.name ?? null,
+        note:           p['Note']?.rich_text?.[0]?.plain_text ?? '',
+        // denormalised from Progetto
+        cliente:        progetto?.nome      ?? '—',
+        servizi:        progetto?.servizi   ?? [],
+        statoLavori:    progetto?.stato     ?? [],
+        categoria:      progetto?.categoria ?? [],
+        notionUrl:      progetto?.notionUrl ?? page.url,
+        progettoUrl:    progetto?.notionUrl ?? null,
       };
     });
 
-    return res.status(200).json(clients);
-  }
-
-  // ── PATCH → update Mesi Attivi for a page ──────────────────────────────
-  if (req.method === 'PATCH') {
-    let body;
-    try {
-      body = await parseBody(req);
-    } catch {
-      return res.status(400).json({ error: 'Invalid request body' });
+    // Also expose a deduplicated client list for the table
+    const clientiMap = {};
+    for (const f of fatture) {
+      if (!f.progettoId) continue;
+      if (!clientiMap[f.progettoId]) {
+        clientiMap[f.progettoId] = {
+          progettoId:  f.progettoId,
+          cliente:     f.cliente,
+          servizi:     f.servizi,
+          statoLavori: f.statoLavori,
+          categoria:   f.categoria,
+          notionUrl:   f.progettoUrl,
+        };
+      }
     }
 
-    const { pageId, mesiAttivi, mrr } = body;
-    if (!pageId) return res.status(400).json({ error: 'pageId required' });
-
-    const properties = {};
-    if (Array.isArray(mesiAttivi)) {
-      properties['Mesi Attivi'] = { multi_select: mesiAttivi.map(m => ({ name: m })) };
-    }
-    if (mrr !== undefined) {
-      properties['MRR'] = { number: parseFloat(mrr) || 0 };
-    }
-    if (!Object.keys(properties).length) return res.status(400).json({ error: 'nothing to update' });
-
-    const r = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({ properties }),
+    return res.status(200).json({
+      fatture,
+      clienti: Object.values(clientiMap),
     });
-
-    if (!r.ok) return res.status(r.status).json(await r.json());
-    return res.status(200).json({ ok: true });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e) });
   }
-
-  return res.status(405).json({ error: 'Method not allowed' });
 }
