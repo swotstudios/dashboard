@@ -3,6 +3,7 @@ import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 import MetricCard from './components/MetricCard.jsx';
 import ForecastChart from './components/ForecastChart.jsx';
 import ClientTable from './components/ClientTable.jsx';
+import MonthDrawer from './components/MonthDrawer.jsx';
 import { fetchData } from './lib/notion.js';
 import {
   buildMonthlyRevenue, buildUnatantum, buildLabels, getYearSplit,
@@ -39,9 +40,10 @@ export default function App() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
 
-  const [filterTipoVoce, setFilterTipoVoce] = useState(null);   // null=tutti
+  const [filterTipoVoce, setFilterTipoVoce] = useState(null);
   const [filterServizio, setFilterServizio] = useState(null);
-  const [filterStato, setFilterStato]       = useState('attivi'); // 'attivi'|'tutti'
+  const [filterStato, setFilterStato]       = useState('attivi');
+  const [selectedMonth, setSelectedMonth]   = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -229,6 +231,7 @@ export default function App() {
           utMap={utMap}
           trend={trend}
           yearSplit={yearSplit}
+          onMonthClick={setSelectedMonth}
         />
       </div>
 
@@ -238,6 +241,14 @@ export default function App() {
       <p style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '10px', fontFamily: 'var(--mono)', color: 'rgba(255,255,255,0.12)' }}>
         swotstudios · fonte: notion / fatture
       </p>
+
+      {selectedMonth && (
+        <MonthDrawer
+          ym={selectedMonth}
+          fatture={filteredFatture}
+          onClose={() => setSelectedMonth(null)}
+        />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
