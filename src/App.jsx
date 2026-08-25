@@ -121,6 +121,11 @@ export default function App() {
   const ut26 = useMemo(
     () => yearUnatantum(allUtMap, labels, String(currentYear)), [allUtMap, labels, currentYear]
   );
+  const ut27 = useMemo(
+    () => yearUnatantum(allUtMap, labels, String(nextYear)), [allUtMap, labels, nextYear]
+  );
+  const fatturato26 = tot26 + ut26;
+  const fatturato27 = tot27 + ut27;
   const peak = useMemo(() => peakMonth(allRevMap, labels), [allRevMap, labels]);
   const trend0 = useMemo(() => trendline(labels, allRevMap), [labels, allRevMap]);
   const trendDir = trend0.length > 1 ? trend0[trend0.length - 1] > trend0[0] : false;
@@ -197,13 +202,15 @@ export default function App() {
         <MetricCard label="Clienti attivi" value={nAttivi} sub="MRR ricorrente oggi o futuro" />
         <MetricCard label="MRR corrente" value={fmt(mrr)} sub="mese in corso" />
         <MetricCard
-          label={`Totale ${currentYear}`}
+          label={`Totale MRR ${currentYear}`}
           value={fmt(tot26)}
           sub={`${fmt(real26)} reale + ${fmt(proj26)} previsto`}
           accent
         />
-        <MetricCard label={`Totale ${nextYear}`} value={fmt(tot27)} sub="proiezione anno completo" accent />
+        <MetricCard label={`Totale MRR ${nextYear}`} value={fmt(tot27)} sub="proiezione anno completo" accent />
         <MetricCard label={`Una tantum ${currentYear}`} value={fmt(ut26)} sub="extra / spot" />
+        <MetricCard label={`Totale fatturato ${currentYear}`} value={fmt(fatturato26)} sub={`MRR + una tantum`} accent />
+        <MetricCard label={`Totale fatturato ${nextYear}`} value={fmt(fatturato27)} sub={`MRR + una tantum`} accent />
         <MetricCard label="Picco mensile" value={fmt(peak)} sub={
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {trendDir
