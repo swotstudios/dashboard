@@ -27,7 +27,7 @@ function LegendDot({ color, border, label }) {
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
       <span style={{
-        width: '10px', height: '10px', borderRadius: '2px',
+        width: '9px', height: '9px', borderRadius: '2px',
         background: color,
         border: border ? `0.5px solid ${border}` : 'none',
         display: 'inline-block', flexShrink: 0,
@@ -37,32 +37,44 @@ function LegendDot({ color, border, label }) {
   );
 }
 
-/**
- * Props:
- *  labels       – ['YYYY-MM', ...]
- *  map          – { 'YYYY-MM': { real, proj100, proj40 } }  (MRR)
- *  utMap        – { 'YYYY-MM': { real, proj100, proj40 } }  (Una tantum)
- *  trend        – number[] based on MRR real+proj100
- *  yearSplit    – number of labels in current year
- *  onMonthClick – (ym: string) => void
- */
 export default function ForecastChart({ labels, map, utMap, trend, yearSplit, onMonthClick }) {
-  const canvasRef = useRef(null);
-  const chartRef  = useRef(null);
-  const [view, setView] = useState('tutti'); // 'tutti' | 'mrr' | 'unatantum'
+  const canvasRef   = useRef(null);
+  const chartRef    = useRef(null);
+  const wrapperRef  = useRef(null);
+  const [view, setView] = useState('tutti');
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+
+  // Track container width to switch mobile/desktop layout
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setIsMobile(entry.contentRect.width < 540);
+    });
+    ro.observe(wrapperRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     chartRef.current?.destroy();
 
-    const axisLabels = labels.map(fmtLabel);
     const showMrr = view !== 'unatantum';
     const showUt  = view !== 'mrr';
 
     const mrrReal    = labels.map(ym => showMrr ? (map[ym]?.real    ?? 0) : 0);
     const mrrProj100 = labels.map(ym => showMrr ? (map[ym]?.proj100 ?? 0) : 0);
     const mrrProj40  = labels.map(ym => showMrr ? (map[ym]?.proj40  ?? 0) : 0);
-    const utTotal    = labels.map(ym => showUt  ? ((utMap[ym]?.real ?? 0) + (utMap[ym]?.proj100 ?? 0) + (utMap[ym]?.proj40 ?? 0)) : 0);
+    const utTotal    = labels.map(ym => showUt
+      ? ((utMap[ym]?.real ?? 0) + (utMap[ym]?.proj100 ?? 0) + (utMap[ym]?.proj40 ?? 0))
+      : 0);
+
+    // For mobile: show only every-other month label to avoid crowding
+    const axisLabels = labels.map((ym, i) => {
+      if (!isMobile) return fmtLabel(ym);
+      // On mobile show Jan, Mar, May… of each year (every 2 months)
+      const [, m] = ym.split('-').map(Number);
+      return m % 2 === 1 ? fmtLabel(ym) : '';
+    });
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
@@ -75,7 +87,7 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
             backgroundColor: 'rgba(200,240,74,0.75)',
             borderColor: '#c8f04a',
             borderWidth: 1,
-            borderRadius: 3,
+            borderRadius: isMobile ? 2 : 3,
             stack: 'revenue',
             order: 4,
           },
@@ -89,7 +101,7 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
               i < yearSplit ? 'rgba(200,240,74,0.55)' : 'rgba(91,156,246,0.65)'
             ),
             borderWidth: 1,
-            borderRadius: 3,
+            borderRadius: isMobile ? 2 : 3,
             stack: 'revenue',
             order: 5,
           },
@@ -99,7 +111,7 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
             backgroundColor: 'rgba(91,156,246,0.10)',
             borderColor: 'rgba(91,156,246,0.28)',
             borderWidth: 1,
-            borderRadius: 3,
+            borderRadius: isMobile ? 2 : 3,
             stack: 'revenue',
             order: 6,
           },
@@ -109,7 +121,7 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
             backgroundColor: 'rgba(240,146,74,0.40)',
             borderColor: '#f0924a',
             borderWidth: 1,
-            borderRadius: 3,
+            borderRadius: isMobile ? 2 : 3,
             stack: 'revenue',
             order: 7,
           },
@@ -144,18 +156,37 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
             borderWidth: 1,
             titleColor: '#6b6b6b',
             bodyColor: '#e8e6e0',
+            footerColor: '#e8e6e0',
+            footerFont: { weight: '600', family: "'DM Mono', monospace", size: 11 },
+            footerMarginTop: 8,
             padding: 10,
-            filter: item => item.parsed.y !== 0,
+            filter: item => item.parsed.y !== 0 && item.dataset.label !== 'Trendline',
             callbacks: {
-              title: ([ctx]) => `${ctx.label} — clicca per i dettagli`,
+              title: ([ctx]) => {
+                // Use the original YYYY-MM label (not the possibly-blank axis label)
+                return `${fmtLabel(labels[ctx.dataIndex])}  ·  tocca per i dettagli`;
+              },
               label: ctx => {
                 const v = ctx.parsed.y;
                 const f = '€' + Math.round(v).toLocaleString('it-IT');
-                if (ctx.dataset.label === 'MRR reale')              return `MRR reale: ${f}`;
-                if (ctx.dataset.label === 'MRR proiettato')         return `MRR proiettato: ${f}`;
-                if (ctx.dataset.label === 'MRR previsionale (40%)') return `MRR previsionale (40%): ${f}`;
-                if (ctx.dataset.label === 'Una tantum')             return `Una tantum: ${f}`;
-                if (ctx.dataset.label === 'Trendline')              return `trend: ${f}`;
+                if (ctx.dataset.label === 'MRR reale')              return `  MRR reale: ${f}`;
+                if (ctx.dataset.label === 'MRR proiettato')         return `  MRR proiettato: ${f}`;
+                if (ctx.dataset.label === 'MRR previsionale (40%)') return `  MRR prev. 40%: ${f}`;
+                if (ctx.dataset.label === 'Una tantum')             return `  Una tantum: ${f}`;
+              },
+              footer: (items) => {
+                if (!items.length) return;
+                const idx = items[0].dataIndex;
+                const mrr = mrrReal[idx] + mrrProj100[idx] + mrrProj40[idx];
+                const ut  = utTotal[idx];
+                const tot = mrr + ut;
+                if (tot === 0) return;
+                const parts = [];
+                if (mrr > 0 && ut > 0) {
+                  parts.push(`MRR ${fmt(mrr)}  +  Una tantum ${fmt(ut)}`);
+                }
+                parts.push(`Totale: ${fmt(tot)}`);
+                return parts;
               },
             },
           },
@@ -165,16 +196,26 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
             stacked: true,
             grid: { display: false },
             border: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { ...TICK_STYLE, autoSkip: false, maxRotation: 45 },
+            ticks: {
+              ...TICK_STYLE,
+              maxRotation: isMobile ? 0 : 45,
+              minRotation: 0,
+              autoSkip: false,
+            },
           },
           y: {
             stacked: true,
             grid: { color: 'rgba(255,255,255,0.04)' },
             border: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { ...TICK_STYLE, callback: v => '€' + v.toLocaleString('it-IT') },
+            ticks: {
+              ...TICK_STYLE,
+              maxTicksLimit: isMobile ? 4 : 6,
+              callback: v => isMobile
+                ? (v >= 1000 ? '€' + (v / 1000).toFixed(0) + 'k' : '€' + v)
+                : '€' + v.toLocaleString('it-IT'),
+            },
           },
         },
-        // pointer cursor on hover
         onHover: (evt, elements) => {
           evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
         },
@@ -182,49 +223,68 @@ export default function ForecastChart({ labels, map, utMap, trend, yearSplit, on
     });
 
     return () => chartRef.current?.destroy();
-  }, [labels, map, utMap, trend, yearSplit, view, onMonthClick]);
+  }, [labels, map, utMap, trend, yearSplit, view, isMobile, onMonthClick]);
+
+  const chartHeight = isMobile ? '220px' : '280px';
 
   return (
     <div style={{
       background: 'var(--surface)', border: '0.5px solid var(--border)',
-      borderRadius: 'var(--radius-lg)', padding: '1.25rem',
+      borderRadius: 'var(--radius-lg)', padding: isMobile ? '1rem' : '1.25rem',
     }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <p style={{ fontSize: '11px', fontFamily: 'var(--mono)', color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
             ricavi mensili
           </p>
-          {/* View filter */}
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['tutti', 'tutti'], ['mrr', 'mrr'], ['unatantum', 'una tantum']].map(([k, label]) => (
+            {[['tutti', 'tutti'], ['mrr', 'mrr'], ['unatantum', '1×']].map(([k, label]) => (
               <button key={k} onClick={() => setView(k)} style={pill(view === k)}>{label}</button>
             ))}
           </div>
         </div>
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--muted)', fontFamily: 'var(--mono)', flexWrap: 'wrap' }}>
-          {view !== 'unatantum' && <>
-            <LegendDot color="rgba(200,240,74,0.8)" label="mrr reale" />
-            <LegendDot color="rgba(200,240,74,0.22)" border="rgba(200,240,74,0.6)" label="proiettato" />
-            <LegendDot color="rgba(91,156,246,0.10)" border="rgba(91,156,246,0.28)" label="previsionale 40%" />
-          </>}
-          {view !== 'mrr' && <LegendDot color="rgba(240,146,74,0.4)" border="#f0924a" label="una tantum" />}
-          {view !== 'unatantum' && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '16px', borderTop: '2px dashed #f0924a', display: 'inline-block' }} />
-              trend
-            </span>
-          )}
-        </div>
+        {/* Legend — hide on very small screens, shown via tooltip */}
+        {!isMobile && (
+          <div style={{ display: 'flex', gap: '10px', fontSize: '10px', color: 'var(--muted)', fontFamily: 'var(--mono)', flexWrap: 'wrap' }}>
+            {view !== 'unatantum' && <>
+              <LegendDot color="rgba(200,240,74,0.8)" label="mrr reale" />
+              <LegendDot color="rgba(200,240,74,0.22)" border="rgba(200,240,74,0.6)" label="proiettato" />
+              <LegendDot color="rgba(91,156,246,0.10)" border="rgba(91,156,246,0.28)" label="prev. 40%" />
+            </>}
+            {view !== 'mrr' && <LegendDot color="rgba(240,146,74,0.4)" border="#f0924a" label="una tantum" />}
+            {view !== 'unatantum' && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: '14px', borderTop: '2px dashed #f0924a', display: 'inline-block' }} />
+                trend
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      <div style={{ position: 'relative', width: '100%', height: '280px' }}>
+      {/* Legend compact for mobile */}
+      {isMobile && (
+        <div style={{ display: 'flex', gap: '8px', fontSize: '9px', color: 'var(--muted)', fontFamily: 'var(--mono)', flexWrap: 'wrap', marginBottom: '10px' }}>
+          {view !== 'unatantum' && <>
+            <LegendDot color="rgba(200,240,74,0.8)" label="reale" />
+            <LegendDot color="rgba(200,240,74,0.22)" border="rgba(200,240,74,0.6)" label="proj." />
+            <LegendDot color="rgba(91,156,246,0.10)" border="rgba(91,156,246,0.28)" label="40%" />
+          </>}
+          {view !== 'mrr' && <LegendDot color="rgba(240,146,74,0.4)" border="#f0924a" label="una tantum" />}
+        </div>
+      )}
+
+      <div ref={wrapperRef} style={{ position: 'relative', width: '100%', height: chartHeight }}>
         <canvas ref={canvasRef} />
       </div>
-      <p style={{ textAlign: 'center', fontSize: '10px', fontFamily: 'var(--mono)', color: '#444', marginTop: '8px' }}>
-        clicca su un mese per vedere le voci
+      <p style={{ textAlign: 'center', fontSize: '10px', fontFamily: 'var(--mono)', color: '#383838', marginTop: '6px' }}>
+        {isMobile ? 'tocca una barra per i dettagli' : 'clicca su un mese per vedere le voci'}
       </p>
     </div>
   );
+}
+
+function fmt(n) {
+  return '€' + Math.round(n).toLocaleString('it-IT');
 }

@@ -49,3 +49,24 @@ input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
 }
+
+/* ── Mobile ── */
+@media (max-width: 600px) {
+  html { font-size: 13px; }
+
+  /* Tighter page padding on small screens */
+  .dash-root {
+    padding: 1rem !important;
+  }
+
+  /* Metric cards: 2 per row on mobile */
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Table: allow horizontal scroll */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

@@ -139,7 +139,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 1.5rem' }}>
+    <div className="dash-root" style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 1.5rem' }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
@@ -200,7 +200,7 @@ export default function App() {
       )}
 
       {/* ── Metrics ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
+      <div className="metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '1.25rem' }}>
         <MetricCard label="Clienti attivi" value={nAttivi} sub="MRR ricorrente oggi o futuro" />
         <MetricCard label="MRR corrente" value={fmt(mrr)} sub="mese in corso" />
         <MetricCard
