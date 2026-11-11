@@ -1,5 +1,5 @@
 // ── configurable weights ───────────────────────────────────────────────────────
-export const PESO_PREVISIONALE = 0.40;
+export const PESO_PREVISIONALE = 1.00;
 
 // ── constants ──────────────────────────────────────────────────────────────────
 export const MESI_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
